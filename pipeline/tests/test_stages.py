@@ -2,6 +2,7 @@ import pytest
 
 from pipeline.agent import FakeAgent
 from pipeline.cost import BudgetExceeded, CostLedger
+from pipeline.forge import FakeForge
 from pipeline.run_dir import RunDir
 from pipeline.stages import Pipeline, phase_count, phase_stage
 
@@ -18,6 +19,8 @@ def respond(prompt):
         return PLAN
     if "/decide/SKILL.md" in prompt:
         return DECISIONS
+    if "/forge-cli/SKILL.md" in prompt:
+        return "# Add dark mode\n\nbody"
     return "content"
 
 
@@ -26,11 +29,18 @@ class Harness:
         self.tmp_path = tmp_path
         self.run_dir = RunDir(tmp_path, "feat")
         self.ledger = CostLedger(self.run_dir.path / "cost.csv", budget)
-        self.agent = FakeAgent(respond, cost_usd=cost)
+        self.block_phase_2 = False
+        self.agent = FakeAgent(self._respond, cost_usd=cost)
+        self.forge = FakeForge()
         self.questions: list[str] = []
         self.shown: list[str] = []
         self.answers = answers
         self.options = options
+
+    def _respond(self, prompt):
+        if self.block_phase_2 and "Implement only phase 2" in prompt:
+            return "Status: blocked - tests fail twice"
+        return respond(prompt)
 
     def confirm(self, question):
         self.questions.append(question)
@@ -39,7 +49,7 @@ class Harness:
     def pipeline(self):
         return Pipeline(
             self.run_dir, self.ledger, lambda stage: self.agent, self.tmp_path / "skills",
-            "an idea", self.confirm, self.shown.append, **self.options,
+            "an idea", self.confirm, self.shown.append, self.forge, **self.options,
         )
 
     def called_stages(self):
@@ -129,3 +139,37 @@ def test_phase_count():
 def test_phase_count_rejects_bad_plans(plan):
     with pytest.raises(ValueError):
         phase_count(plan)
+
+
+def test_forge_gets_issue_then_checkpoint_per_executed_stage(tmp_path):
+    h = Harness(tmp_path)
+    h.pipeline().run()
+    assert h.forge.calls[:2] == [("open_issue", "Add dark mode"), ("checkpoint", "issue")]
+    assert [c[1] for c in h.forge.calls if c[0] == "checkpoint"] == STAGE_ORDER
+    assert h.forge.calls[-1] == ("finish", "content")
+
+
+def test_declining_gate_b_does_not_finish(tmp_path):
+    h = Harness(tmp_path, answers=lambda q: "Mark the PR" not in q)
+    assert h.pipeline().run() == "docs"
+    assert all(call[0] != "finish" for call in h.forge.calls)
+
+
+def test_resume_does_not_checkpoint_skipped_stages(tmp_path):
+    h = Harness(tmp_path, stop_after="analyze")
+    h.pipeline().run()
+    h.forge.calls.clear()
+    h.options = {"stop_after": "decide"}
+    h.pipeline().run()
+    assert h.forge.calls == [("checkpoint", "decide")]
+
+
+def test_blocked_stage_is_kept_aside_and_rerun_on_resume(tmp_path):
+    h = Harness(tmp_path)
+    h.block_phase_2 = True
+    assert h.pipeline().run() == "implement-phase-2"
+    h.block_phase_2 = False
+    assert not h.run_dir.exists(h.run_dir.artifact_path("phase-2-summary"))
+    assert "tests fail twice" in (h.run_dir.path / "implement-phase-2.blocked.md").read_text()
+    assert ("checkpoint", "implement-phase-2") in h.forge.calls
+    assert h.pipeline().run() is None
