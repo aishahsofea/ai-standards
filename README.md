@@ -44,3 +44,7 @@ Pinning the submodule commit makes standards changes reviewable and prevents an 
 - Put short, universal behavior in `AGENTS.md`.
 - Keep detailed, task-specific workflows in separate documents and reference them only when relevant.
 - Prefer reviewable policy updates over broad, absolute wording such as "always use one-liners." Brevity should remove noise, not reduce readability or correctness.
+
+## Feature pipeline
+
+`pipeline/` turns a feature idea into a draft pull request, with the agent skills it uses in `skills/`. See [pipeline/README.md](pipeline/README.md).
