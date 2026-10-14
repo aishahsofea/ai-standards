@@ -69,15 +69,15 @@ Resuming asks both gates again.
 
 ## Cost controls
 
-- `BUDGET_USD` sets the limit for a feature. Default: 15.
+- `BUDGET_USD` sets the limit for a feature. Default: 15 (US dollars).
 - Before each stage the run stops if spend is already over the limit. After a stage starts, the agent is given the remaining budget as its own cap.
-- Each stage has a turn cap and a 30-minute timeout.
+- Each stage has its own turn cap (10 to 60 turns) and a 30-minute timeout.
 - Every stage's cost is added to `cost.csv` in the run folder. A resumed run counts what it spent before.
-- A stage whose report starts with `Status: blocked` or `Status: fail` stops the run. The report is saved as `<stage>.blocked.md`, and `--resume` runs that stage again.
+- If a stage's report starts with `Status: blocked` or `Status: fail`, the run stops. The report is saved as `<stage>.blocked.md`, and `--resume` runs that stage again.
 
 ## Skills
 
-The pipeline gives each agent the full path to its skill file, so you do not need to install anything for it to work.
+The pipeline passes each agent the full path to its skill file, so no install is needed.
 
 To use the new skills in interactive Claude Code sessions, link the ones you do not already have:
 
@@ -91,7 +91,7 @@ The skills are plain Markdown, so any agent can follow one if you point it at th
 
 ## Limits
 
-- `claude -p` cannot edit files or run commands unless it is allowed to. `ClaudeAgent` passes no permission flags, so the target repo needs allow rules in `.claude/settings.json`. Not yet tested end to end.
+- `claude -p` can't edit files or run commands without permission. `ClaudeAgent` passes no permission flags, so the target repo's `.claude/settings.json` needs allow rules. Not yet tested end to end.
 - The `--max-turns` and `--max-budget-usd` flags have not been checked against a live `claude` run.
 - Not built: automatic continuation past the gates, a GitHub Actions trigger, and a Codex adapter.
 
