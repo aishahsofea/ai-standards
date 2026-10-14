@@ -8,7 +8,7 @@ idea -> issue -> analyze -> decide -> [Gate A] -> plan -> phase 1..N -> test -> 
 
 ## Requirements
 
-- Python 3.12 or newer. No other Python packages.
+- Python 3.12 or newer. The pipeline itself needs no packages; `pytest` is only for tests.
 - `git`, `gh` (logged in), and the `claude` CLI (logged in).
 
 ## Install
@@ -16,7 +16,7 @@ idea -> issue -> analyze -> decide -> [Gate A] -> plan -> phase 1..N -> test -> 
 ```sh
 cd pipeline
 python3 -m venv .venv
-.venv/bin/pip install -e .
+.venv/bin/pip install -e ".[dev]"
 ```
 
 ## Use
@@ -98,6 +98,7 @@ The skills are plain Markdown, so any agent can follow one if you point it at th
 ## Test
 
 ```sh
-cd pipeline
-python3 -m pytest
+.venv/bin/python -m pytest
 ```
+
+Run it from the `pipeline` folder.
