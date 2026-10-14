@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 
-ARTIFACTS = ("issue", "analysis", "decisions", "plan")
+ARTIFACT_NAME = re.compile(r"issue|analysis|decisions|plan|test-report|pr|phase-[1-9]\d*-summary")
 MAX_SLUG_LENGTH = 50
 
 
@@ -23,14 +23,14 @@ class RunDir:
         return cls(repo, slugify(idea))
 
     def artifact_path(self, name: str) -> Path:
-        if name in ARTIFACTS:
+        if ARTIFACT_NAME.fullmatch(name):
             return self.path / f"{name}.md"
         raise ValueError(f"unknown artifact: {name}")
 
     def phase_summary_path(self, phase: int) -> Path:
         if phase < 1:
             raise ValueError("phase numbers start at 1")
-        return self.path / f"phase-{phase}-summary.md"
+        return self.artifact_path(f"phase-{phase}-summary")
 
     def exists(self, path: Path) -> bool:
         return path.is_file()
