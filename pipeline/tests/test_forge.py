@@ -1,8 +1,9 @@
 import subprocess
+from pathlib import Path
 
 import pytest
 
-from pipeline.forge import ForgeError, GitHubForge, RunState
+from pipeline.forge import ForgeError, GitHubForge, Issue, RunState, fetch_issue
 
 
 class Shell:
@@ -92,3 +93,12 @@ def test_command_failure_raises(make):
     forge, _, _ = make(git_add=None)
     with pytest.raises(ForgeError, match="nope"):
         forge.checkpoint("issue")
+
+
+def test_fetch_issue_parses_gh_json(make):
+    _, shell, _ = make(gh_issue='{"title": "Add dark mode", "body": "Details", "url": "https://github.com/o/r/issues/7"}')
+    issue = fetch_issue(Path("."), "7")
+    assert issue == Issue("Add dark mode", "Details", "https://github.com/o/r/issues/7")
+    assert issue.number == "7"
+    assert issue.markdown == "# Add dark mode\n\nDetails\n"
+    assert shell.ran("gh", "issue", "view", "7")

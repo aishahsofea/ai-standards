@@ -16,6 +16,30 @@ class Forge(Protocol):
     def finish(self, pr_body: str) -> None: ...
 
 
+@dataclass(frozen=True)
+class Issue:
+    title: str
+    body: str
+    url: str
+
+    @property
+    def number(self) -> str:
+        return self.url.rsplit("/", 1)[-1]
+
+    @property
+    def markdown(self) -> str:
+        return f"# {self.title}\n\n{self.body}\n"
+
+
+def fetch_issue(repo: Path, ref: str) -> Issue:
+    proc = subprocess.run(
+        ["gh", "issue", "view", ref, "--json", "title,body,url"], cwd=repo, capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        raise ForgeError(f"gh issue view failed: {proc.stderr.strip()}")
+    return Issue(**json.loads(proc.stdout))
+
+
 @dataclass
 class RunState:
     idea: str

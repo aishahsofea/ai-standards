@@ -25,12 +25,14 @@ Run from the repository you want to change. Its working tree must be clean.
 
 ```sh
 pipeline run "Add a dark mode toggle"
+pipeline run --issue 42
 pipeline run --resume add-a-dark-mode-toggle
 pipeline run "Add a dark mode toggle" --dry-run
 ```
 
 | Option | Effect |
 |---|---|
+| `--issue REF` | Start from an existing GitHub issue (number or URL) instead of an idea. Skips the issue stage and starts at analyze. |
 | `--resume SLUG` | Continue an earlier run. Finished stages are skipped. |
 | `--dry-run` | Use a fake agent and fake GitHub in a temp directory. Nothing is spent or pushed. |
 | `--repo PATH` | Target repository. Default: current directory. |

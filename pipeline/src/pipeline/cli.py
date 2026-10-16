@@ -7,7 +7,7 @@ from pathlib import Path
 from pipeline.agent import AgentError, FakeAgent
 from pipeline.claude_agent import ClaudeAgent
 from pipeline.cost import DEFAULT_BUDGET_USD, BudgetExceeded, CostLedger
-from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState
+from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue
 from pipeline.gates import confirm
 from pipeline.run_dir import RunDir, slugify
 from pipeline.stages import Pipeline
@@ -28,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pipeline")
     run = parser.add_subparsers(dest="command", required=True).add_parser("run", help="run the feature pipeline")
     run.add_argument("idea", nargs="?", help="the feature idea")
+    run.add_argument("--issue", metavar="REF", help="start from an existing GitHub issue (number or URL)")
     run.add_argument("--resume", metavar="SLUG", help="continue an earlier run")
     run.add_argument("--dry-run", action="store_true", help="use a fake agent and forge in a temp repo")
     run.add_argument("--repo", type=Path, default=Path.cwd(), help="target repo (default: current directory)")
@@ -37,16 +38,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run_pipeline(args: argparse.Namespace) -> int:
     repo = Path(tempfile.mkdtemp(prefix="pipeline-dry-run-")) if args.dry_run else args.repo.resolve()
-    slug = args.resume or slugify(args.idea)
+    issue = fetch_issue(repo, args.issue) if args.issue else None
+    slug = args.resume or (slugify(f"{issue.number} {issue.title}") if issue else slugify(args.idea))
     run_dir = RunDir(repo, slug)
     state_path = run_dir.path / "state.json"
     if args.resume and not state_path.exists():
         raise ForgeError(f"no run '{slug}' in {repo}")
-    state = RunState.load(state_path) if args.resume else RunState(args.idea)
+    if args.resume or (issue and state_path.exists()):
+        state = RunState.load(state_path)
+    else:
+        state = RunState(issue.title, issue.url) if issue else RunState(args.idea)
 
     forge: Forge = FakeForge() if args.dry_run else GitHubForge(repo, slug, state, state_path)
     forge.start_branch()
     state.save(state_path)
+    issue_path = run_dir.artifact_path("issue")
+    if issue and not run_dir.exists(issue_path):
+        run_dir.write(issue_path, issue.markdown)
 
     fake_agent = FakeAgent(dry_run_text)
     agent_for = (
@@ -71,10 +79,10 @@ def run_pipeline(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if bool(args.idea) == bool(args.resume):
-        parser.error("give an idea or --resume SLUG, not both or neither")
-    if args.dry_run and args.resume:
-        parser.error("--dry-run cannot resume")
+    if sum(map(bool, (args.idea, args.resume, args.issue))) != 1:
+        parser.error("give exactly one of: an idea, --issue REF, --resume SLUG")
+    if args.dry_run and (args.resume or args.issue):
+        parser.error("--dry-run cannot resume or use --issue")
     try:
         return run_pipeline(args)
     except (AgentError, BudgetExceeded, ForgeError) as error:
