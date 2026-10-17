@@ -14,6 +14,16 @@ Build one phase of the plan and nothing else. Headless (the prompt says to run n
 3. Run the phase's `Verify` step and the existing tests for the area. Match the surrounding code's style.
 4. If verification fails twice, stop and report it. Do not keep retrying.
 
+## Excuses to reject
+
+| Excuse | Reply |
+|---|---|
+| "The change is too small to need a test." | Write the failing test first. Small changes break things too. |
+| "I'll relax this assertion so the test passes." | The test is the spec. Fix the code, or report `Status: blocked`. |
+| "That failure was already there." | Stash your change and rerun. If it still fails, list it under Deviations. If it passes, your change broke it. |
+| "The next phase will cover it." | Only this phase counts. List missing work under Deviations in the summary. |
+| "Verification failed twice but it is close." | Stop. Report `Status: blocked` with the output. |
+
 ## Rules
 
 - Implement only the named phase. Do not start later phases or clean up unrelated code.
@@ -22,7 +32,7 @@ Build one phase of the plan and nothing else. Headless (the prompt says to run n
 
 ## Summary format
 
-The first line is `Status: done` or `Status: blocked - <reason>`. Then:
+The first line must be exactly `Status: done` or `Status: blocked - <reason>`. Any other first line stops the run as blocked. Then:
 
 - **Changed** — files with `file:line` and one line each.
 - **Verified** — commands run and their outcome.

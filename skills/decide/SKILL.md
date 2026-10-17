@@ -39,6 +39,16 @@ Use exactly these headings so later stages can parse them:
 
 Write `None.` under a heading with no entries. Never drop `## Escalated`: Gate A reads it, and the human writes their answer on each `Answer:` line.
 
+## Excuses to reject
+
+| Excuse | Reply |
+|---|---|
+| "It is only a small API detail." | Anything public or external is hard to reverse. Escalate. |
+| "The human would probably pick my recommendation." | Probably is not evidence. Escalate. |
+| "I'll decide it now and the plan can revisit it." | Later stages treat decisions as binding. Escalate. |
+| "It sounds like a security question, but the fix is obvious." | Security and data-model choices always go to a human. |
+| "I remember how the code works." | Open the file and cite `file:line`, or escalate. |
+
 ## Rules
 
 - Decide as little as is safe: a wrongly decided hard-to-reverse question costs more than an extra escalation.

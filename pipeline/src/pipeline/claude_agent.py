@@ -6,10 +6,12 @@ from pipeline.agent import AgentError, Result
 
 
 class ClaudeAgent:
-    def __init__(self, cwd: Path, max_turns: int, timeout_s: float) -> None:
+    def __init__(self, cwd: Path, max_turns: int, timeout_s: float, read_only: bool = False, add_dirs: tuple[Path, ...] = ()) -> None:
         self.cwd = cwd
         self.max_turns = max_turns
         self.timeout_s = timeout_s
+        self.read_only = read_only
+        self.add_dirs = add_dirs
 
     def run(self, prompt: str, model: str, budget: float) -> Result:
         command = [
@@ -19,6 +21,9 @@ class ClaudeAgent:
             "--max-turns", str(self.max_turns),
             "--max-budget-usd", str(budget),
         ]
+        if self.add_dirs:
+            command += ["--add-dir", *map(str, self.add_dirs)]
+        command += ["--disallowedTools", "Edit,Write,NotebookEdit"] if self.read_only else ["--permission-mode", "acceptEdits"]
         try:
             proc = subprocess.run(
                 command, cwd=self.cwd, capture_output=True, text=True, timeout=self.timeout_s

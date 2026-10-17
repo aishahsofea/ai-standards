@@ -9,7 +9,7 @@ Update the docs the feature affects and write the PR text. Headless (the prompt 
 
 ## Steps
 
-1. Read the plan, phase summaries, and test report. Check the diff against the base branch for what actually changed.
+1. Read the plan, phase summaries, test report, and review. Check the diff against the base branch for what actually changed.
 2. Update existing docs the change makes wrong or incomplete (README, usage, config). Add new docs only where the feature needs them.
 3. Follow the [plain-english](../plain-english/SKILL.md) skill on every doc you wrote or changed.
 4. Do not commit or push; the pipeline does that.
@@ -21,7 +21,7 @@ The reader is a reviewer who did not watch the work and may not know the feature
 - **Summary** — what the feature does and why, in two or three sentences.
 - **By phase** — for each plan phase: what changed and why it was done that way.
 - **Decisions** — decisions that shaped the design, including the human-answered ones.
-- **Verification** — test report result and any acceptance criteria not covered.
+- **Verification** — test report result, any acceptance criteria not covered, and every open Required or Nit finding from the review.
 - **Docs updated** — files changed.
 
 State failures, open concerns, and deviations from the plan plainly.

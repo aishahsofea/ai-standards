@@ -1,4 +1,4 @@
-from pipeline.gates import confirm, escalated_section
+from pipeline.gates import confirm, escalated_section, plan_preview
 
 DECISIONS = """# Decisions
 
@@ -34,3 +34,31 @@ def test_confirm_accepts_only_yes():
     assert confirm("ok?", lambda _: "yes")
     assert not confirm("ok?", lambda _: "")
     assert not confirm("ok?", lambda _: "no")
+
+
+PLAN = """# Plan: x
+
+## Assumptions
+- sqlite is fine
+
+## Phase 1: Schema
+- Verify: pytest
+
+### Phase 2: API
+- Verify: pytest
+
+## Out of scope
+- auth
+"""
+
+
+def test_plan_preview_lists_titles_assumptions_and_out_of_scope():
+    preview = plan_preview(PLAN)
+    assert "1. Schema" in preview and "2. API" in preview
+    assert "## Assumptions\n- sqlite is fine" in preview
+    assert "## Out of scope\n- auth" in preview
+    assert "Verify" not in preview
+
+
+def test_plan_preview_omits_missing_sections():
+    assert "Assumptions" not in plan_preview("## Phase 1: A\n")

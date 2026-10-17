@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -80,3 +81,29 @@ def test_fake_agent_records_calls():
     result = fake.run("abc", "haiku", 1.0)
     assert (result.text, result.cost_usd) == ("ABC", 0.1)
     assert fake.calls == [("abc", "haiku", 1.0)]
+
+
+def test_accepts_file_edits_without_prompting(agent, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(command=command) or completed(payload()))
+    agent.run("hi", "sonnet", 1.0)
+    command = seen["command"]
+    assert command[command.index("--permission-mode") + 1] == "acceptEdits"
+
+
+def test_read_only_denies_edit_tools_and_skips_accept_edits(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(command=command) or completed(payload()))
+    ClaudeAgent(tmp_path, 7, 30, read_only=True).run("hi", "opus", 1.0)
+    command = seen["command"]
+    assert "acceptEdits" not in command
+    assert command[command.index("--disallowedTools") + 1] == "Edit,Write,NotebookEdit"
+
+
+def test_add_dirs_are_passed_for_reading_outside_the_repo(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(command=command) or completed(payload()))
+    ClaudeAgent(tmp_path, 7, 30, False, (Path("/skills"), Path("/inputs"))).run("hi", "opus", 1.0)
+    command = seen["command"]
+    start = command.index("--add-dir")
+    assert command[start + 1 : start + 3] == ["/skills", "/inputs"]

@@ -3,9 +3,9 @@ import shutil
 import tempfile
 from pathlib import Path
 
-STAGE_NAME = r"issue|analyze|decide|plan|implement-phase-[1-9]\d*|test|docs"
+STAGE_NAME = r"issue|analyze|decide|plan|implement-phase-[1-9]\d*|test|review|docs"
 ARTIFACT_NAME = re.compile(
-    rf"issue|analysis|decisions|plan|test-report|pr|cost|phase-[1-9]\d*-summary|(?:{STAGE_NAME})\.blocked"
+    rf"issue|analysis|decisions|plan|test-report|review|pr|cost|phase-[1-9]\d*-summary|(?:{STAGE_NAME})\.blocked"
 )
 MAX_SLUG_LENGTH = 50
 
@@ -37,12 +37,16 @@ class RunDir:
     def state_path(self) -> Path:
         return self.path / "state.json"
 
+    @property
+    def staging(self) -> Path:
+        if self._staging is None:
+            self._staging = Path(tempfile.mkdtemp(prefix="pipeline-inputs-"))
+        return self._staging
+
     def stage_inputs(self, texts: dict[str, str]) -> list[Path]:
         for name in texts:
             check_artifact(name)
-        if self._staging is None:
-            self._staging = Path(tempfile.mkdtemp(prefix="pipeline-inputs-"))
-        paths = [self._staging / f"{name}.md" for name in texts]
+        paths = [self.staging / f"{name}.md" for name in texts]
         for path, text in zip(paths, texts.values()):
             path.write_text(text)
         return paths

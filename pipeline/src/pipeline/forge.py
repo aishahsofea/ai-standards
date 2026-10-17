@@ -145,7 +145,7 @@ class GitHubForge:
     def checkpoint(self, message: str) -> None:
         self._run("git", "add", "-A", "--", ".", EXCLUDE_RUNS)
         if self._run("git", "diff", "--cached", "--name-only"):
-            self._run("git", "commit", "-m", f"pipeline: {message}")
+            self._run("git", "commit", "-m", message)
         self._run("git", "push", "-u", "origin", self.branch)
         if not self.state.pr_url and self._has_commits_to_review():
             self._open_draft_pr()

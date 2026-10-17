@@ -2,6 +2,8 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
+PHASE_HEADING = re.compile(r"^#{2,3} Phase (\d+)(?::\s*(.*))?", re.MULTILINE)
+
 
 @dataclass(frozen=True)
 class Gate:
@@ -12,9 +14,19 @@ class Gate:
     publishes: bool = False
 
 
-def escalated_section(decisions: str) -> str:
-    match = re.search(r"^## Escalated\b.*?(?=^## |\Z)", decisions, re.MULTILINE | re.DOTALL)
+def section(text: str, heading: str) -> str:
+    match = re.search(rf"^## {heading}\b.*?(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
     return match.group(0).strip() if match else ""
+
+
+def escalated_section(decisions: str) -> str:
+    return section(decisions, "Escalated")
+
+
+def plan_preview(plan: str) -> str:
+    titles = [title.strip() for _, title in PHASE_HEADING.findall(plan)]
+    phases = "Phases:\n" + "\n".join(f"{n}. {title}" for n, title in enumerate(titles, 1))
+    return "\n\n".join(part for part in (phases, section(plan, "Assumptions"), section(plan, "Out of scope")) if part)
 
 
 def confirm(question: str, ask: Callable[[str], str] = input) -> bool:

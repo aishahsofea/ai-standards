@@ -7,6 +7,7 @@ from pathlib import Path
 from pipeline.agent import AgentError, FakeAgent
 from pipeline.claude_agent import ClaudeAgent
 from pipeline.cost import DEFAULT_BUDGET_USD, BudgetExceeded, CostLedger, prior_total, render_table
+from pipeline.evals import render_results, run_evals
 from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue
 from pipeline.gates import confirm
 from pipeline.run_dir import RunDir, slugify
@@ -21,12 +22,19 @@ def dry_run_text(prompt: str) -> str:
         return "# Plan\n\n## Phase 1: dry run\n"
     if "/decide/SKILL.md" in prompt:
         return "# Decisions\n\n## Escalated\nNone.\n"
+    if "/implement-phase/SKILL.md" in prompt:
+        return "Status: done\n# dry run\n"
+    if "/test/SKILL.md" in prompt or "/review/SKILL.md" in prompt:
+        return "Status: pass\n# dry run\n"
     return "# dry run\n"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pipeline")
-    run = parser.add_subparsers(dest="command", required=True).add_parser("run", help="run the feature pipeline")
+    commands = parser.add_subparsers(dest="command", required=True)
+    evals = commands.add_parser("eval", help="score the decide and plan skills on fixture cases (spends money)")
+    evals.add_argument("--case", action="append", default=[], metavar="NAME", help="only this case (repeatable)")
+    run = commands.add_parser("run", help="run the feature pipeline")
     run.add_argument("idea", nargs="?", help="the feature idea")
     run.add_argument("--issue", metavar="REF", help="start from an existing GitHub issue (number or URL)")
     run.add_argument("--resume", metavar="SLUG", help="continue an earlier run")
@@ -64,7 +72,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     fake_agent = FakeAgent(dry_run_text)
     agent_for = (
         (lambda stage: fake_agent) if args.dry_run
-        else (lambda stage: ClaudeAgent(repo, stage.max_turns, AGENT_TIMEOUT_S))
+        else (lambda stage: ClaudeAgent(repo, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging)))
     )
     budget = float(os.environ.get("BUDGET_USD", DEFAULT_BUDGET_USD))
     ledger = CostLedger(budget, prior_total(forge.read_artifact("cost")))
@@ -85,9 +93,25 @@ def run_pipeline(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_eval(args: argparse.Namespace) -> int:
+    with tempfile.TemporaryDirectory(prefix="pipeline-eval-") as workdir:
+        results = run_evals(
+            args.case, lambda staging: ClaudeAgent(Path(workdir), 30, AGENT_TIMEOUT_S, True, (SKILLS_DIR, staging)),
+            SKILLS_DIR, Path(workdir),
+        )
+    print(render_results(results))
+    return int(any(result.failures for result in results))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "eval":
+        try:
+            return run_eval(args)
+        except AgentError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
     if sum(map(bool, (args.idea, args.resume, args.issue))) != 1:
         parser.error("give exactly one of: an idea, --issue REF, --resume SLUG")
     if args.dry_run and (args.resume or args.issue):

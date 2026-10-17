@@ -7,11 +7,10 @@ from typing import Literal
 from pipeline.agent import Agent
 from pipeline.cost import CostLedger
 from pipeline.forge import Forge, ForgeError
-from pipeline.gates import GATES
+from pipeline.gates import GATES, PHASE_HEADING, plan_preview
 from pipeline.run_dir import RunDir
 
-PHASE_HEADING = re.compile(r"^#{2,3} Phase (\d+)", re.MULTILINE)
-BLOCKED = re.compile(r"\s*Status:\s*(blocked|fail)", re.IGNORECASE)
+STATUS = re.compile(r"\s*Status:\s*(\w+)", re.IGNORECASE)
 Outcome = Literal["skipped", "done", "blocked"]
 
 
@@ -24,6 +23,9 @@ class Stage:
     model: str
     max_turns: int
     instruction: str = ""
+    statuses: tuple[str, ...] = ()
+    commit: str = ""
+    read_only: bool = False
 
 
 ISSUE_INSTRUCTION = (
@@ -37,10 +39,14 @@ PLAN = Stage("plan", "plan", ("issue", "analysis", "decisions"), "plan", "opus",
 
 
 def phase_count(plan: str) -> int:
-    numbers = [int(number) for number in PHASE_HEADING.findall(plan)]
+    numbers = [int(number) for number, _ in PHASE_HEADING.findall(plan)]
     if not numbers or numbers != list(range(1, len(numbers) + 1)):
         raise ValueError("plan needs sequentially numbered '## Phase N' headings starting at 1")
     return len(numbers)
+
+
+def phase_titles(plan: str) -> list[str]:
+    return [title.strip() for _, title in PHASE_HEADING.findall(plan)]
 
 
 def issue_title(issue: str) -> str:
@@ -52,19 +58,24 @@ def phase_summary(phase: int) -> str:
     return f"phase-{phase}-summary"
 
 
-def phase_stage(phase: int) -> Stage:
+def phase_stage(phase: int, title: str = "") -> Stage:
     earlier = tuple(phase_summary(n) for n in range(1, phase))
     return Stage(
         f"implement-phase-{phase}", "implement-phase", ("plan", *earlier), phase_summary(phase),
-        "sonnet", 60, f"Implement only phase {phase} of the plan.",
+        "sonnet", 60, f"Implement only phase {phase} of the plan.", ("done", "blocked"),
+        f"phase {phase}: {title}" if title else "",
     )
 
 
-def closing_stages(phases: int) -> tuple[Stage, Stage]:
+def closing_stages(phases: int) -> tuple[Stage, Stage, Stage]:
     summaries = tuple(phase_summary(n) for n in range(1, phases + 1))
     return (
-        Stage("test", "test", ("plan", *summaries), "test-report", "sonnet", 30),
-        Stage("docs", "docs", ("plan", *summaries, "test-report"), "pr", "sonnet", 20),
+        Stage("test", "test", ("plan", *summaries), "test-report", "sonnet", 30, statuses=("pass", "fail")),
+        Stage(
+            "review", "review", ("issue", "plan", *summaries, "test-report"), "review", "opus", 30,
+            statuses=("pass", "fail"), read_only=True,
+        ),
+        Stage("docs", "docs", ("plan", *summaries, "test-report", "review"), "pr", "sonnet", 20),
     )
 
 
@@ -86,7 +97,7 @@ class Pipeline:
         for stage in self._stages():
             outcome = self._execute(stage)
             if outcome == "done":
-                self.forge.checkpoint(stage.name)
+                self.forge.checkpoint(stage.commit or f"pipeline: {stage.name}")
             if outcome == "blocked" or stage.name == self.stop_after:
                 return stage.name
             if not self._proceed(stage, outcome == "done"):
@@ -123,7 +134,7 @@ class Pipeline:
     def _stages(self) -> Iterator[Stage]:
         yield from (ISSUE, ANALYZE, DECIDE, PLAN)
         phases = phase_count(self._artifact("plan"))
-        yield from (phase_stage(n) for n in range(1, phases + 1))
+        yield from (phase_stage(n, title) for n, title in enumerate(phase_titles(self._artifact("plan")), 1))
         yield from closing_stages(phases)
 
     def _execute(self, stage: Stage) -> Outcome:
@@ -133,16 +144,27 @@ class Pipeline:
         budget = self.ledger.budget_usd - self.ledger.total()
         result = self.agent_for(stage).run(self.build_prompt(stage), stage.model, budget)
         self.ledger.record(stage.name, stage.model, result.cost_usd)
-        if BLOCKED.match(result.text):
+        if report := self._blocked_report(stage, result.text):
             blocked = f"{stage.name}.blocked"
-            self.show(f"{stage.name} stopped; report posted as the '{blocked}' comment on the issue:\n{result.text}")
-            self.forge.post_artifact(blocked, result.text)
+            self.show(f"{stage.name} stopped; report posted as the '{blocked}' comment on the issue:\n{report}")
+            self.forge.post_artifact(blocked, report)
             return "blocked"
         if stage.output == ISSUE.output:
             self.forge.open_issue(issue_title(result.text), result.text)
         else:
             self.forge.post_artifact(stage.output, result.text)
         return "done"
+
+    @staticmethod
+    def _blocked_report(stage: Stage, text: str) -> str | None:
+        match = STATUS.match(text)
+        status = match[1].lower() if match else None
+        if not stage.statuses:
+            return text if status in ("blocked", "fail") else None
+        if status not in stage.statuses:
+            allowed = "|".join(stage.statuses)
+            return f"Status: blocked - reply must start with `Status: {allowed}`\n\n{text}"
+        return text if status == stage.statuses[-1] else None
 
     def _proceed(self, stage: Stage, ran: bool) -> bool:
         if gate := GATES.get(stage.name):
@@ -151,4 +173,8 @@ class Pipeline:
             if approved and gate.publishes:
                 self.forge.finish(self._artifact(gate.artifact))
             return approved
-        return not (ran and self.pause_each) or self.confirm(f"{stage.name} done. Continue?")
+        if not (ran and self.pause_each):
+            return True
+        if stage.name == PLAN.name:
+            self.show(plan_preview(self._artifact(PLAN.output)))
+        return self.confirm(f"{stage.name} done. Continue?")
