@@ -1,8 +1,7 @@
-import csv
-from pathlib import Path
+import re
 
 DEFAULT_BUDGET_USD = 15.0
-HEADER = ["stage", "model", "cost_usd"]
+TOTAL_LINE = re.compile(r"^Total: \$(\d+(?:\.\d+)?)", re.MULTILINE)
 
 
 class BudgetExceeded(Exception):
@@ -10,25 +9,31 @@ class BudgetExceeded(Exception):
 
 
 class CostLedger:
-    def __init__(self, path: Path, budget_usd: float = DEFAULT_BUDGET_USD) -> None:
-        self.path = path
+    def __init__(self, budget_usd: float = DEFAULT_BUDGET_USD, prior_usd: float = 0.0) -> None:
         self.budget_usd = budget_usd
+        self.prior_usd = prior_usd
+        self.records: list[tuple[str, str, float]] = []
 
     def record(self, stage: str, model: str, cost_usd: float) -> None:
-        is_new = not self.path.exists()
-        with self.path.open("a", newline="") as file:
-            writer = csv.writer(file)
-            if is_new:
-                writer.writerow(HEADER)
-            writer.writerow([stage, model, cost_usd])
+        self.records.append((stage, model, cost_usd))
 
     def total(self) -> float:
-        if not self.path.exists():
-            return 0.0
-        with self.path.open(newline="") as file:
-            return sum(float(row["cost_usd"]) for row in csv.DictReader(file))
+        return self.prior_usd + sum(cost for *_, cost in self.records)
 
     def check(self) -> None:
         total = self.total()
         if total > self.budget_usd:
             raise BudgetExceeded(f"spent ${total:.2f}, over the ${self.budget_usd:.2f} budget")
+
+
+def render_table(ledger: CostLedger) -> str:
+    rows = [("earlier runs", "-", ledger.prior_usd)] if ledger.prior_usd else []
+    lines = ["| stage | model | cost_usd |", "|---|---|---|"]
+    lines += [f"| {stage} | {model} | {cost:.4f} |" for stage, model, cost in [*rows, *ledger.records]]
+    lines += ["", f"Total: ${ledger.total():.4f} of ${ledger.budget_usd:.2f} budget"]
+    return "\n".join(lines)
+
+
+def prior_total(comment: str | None) -> float:
+    match = TOTAL_LINE.search(comment or "")
+    return float(match[1]) if match else 0.0

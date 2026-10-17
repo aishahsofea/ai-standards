@@ -1,33 +1,21 @@
 import pytest
 
-from pipeline.cost import BudgetExceeded, CostLedger
+from pipeline.cost import BudgetExceeded, CostLedger, prior_total, render_table
 
 
-def test_empty_ledger_totals_zero(tmp_path):
-    assert CostLedger(tmp_path / "cost.csv").total() == 0.0
+def test_empty_ledger_totals_zero():
+    assert CostLedger().total() == 0.0
 
 
-def test_record_writes_header_once_and_rows(tmp_path):
-    path = tmp_path / "cost.csv"
-    ledger = CostLedger(path)
-    ledger.record("analyze", "opus", 1.5)
-    ledger.record("plan", "sonnet", 0.25)
-    assert path.read_text().splitlines() == [
-        "stage,model,cost_usd",
-        "analyze,opus,1.5",
-        "plan,sonnet,0.25",
-    ]
-
-
-def test_total_sums_costs(tmp_path):
-    ledger = CostLedger(tmp_path / "cost.csv")
+def test_total_sums_costs():
+    ledger = CostLedger()
     ledger.record("a", "m", 1.5)
     ledger.record("b", "m", 2.25)
     assert ledger.total() == 3.75
 
 
-def test_check_passes_at_cap_and_raises_past_it(tmp_path):
-    ledger = CostLedger(tmp_path / "cost.csv", budget_usd=2.0)
+def test_check_passes_at_cap_and_raises_past_it():
+    ledger = CostLedger(budget_usd=2.0)
     ledger.record("a", "m", 2.0)
     ledger.check()
     ledger.record("b", "m", 0.01)
@@ -35,16 +23,45 @@ def test_check_passes_at_cap_and_raises_past_it(tmp_path):
         ledger.check()
 
 
-def test_resumed_run_counts_earlier_spend(tmp_path):
-    path = tmp_path / "cost.csv"
-    CostLedger(path).record("a", "m", 14.0)
-    resumed = CostLedger(path, budget_usd=15.0)
-    assert resumed.total() == 14.0
-    resumed.record("b", "m", 2.0)
+def test_prior_spend_counts_toward_budget():
+    ledger = CostLedger(budget_usd=15.0, prior_usd=14.0)
+    assert ledger.total() == 14.0
+    ledger.record("b", "m", 2.0)
     with pytest.raises(BudgetExceeded):
-        resumed.check()
-    assert path.read_text().count("stage,model,cost_usd") == 1
+        ledger.check()
 
 
-def test_default_budget_is_fifteen(tmp_path):
-    assert CostLedger(tmp_path / "cost.csv").budget_usd == 15.0
+def test_default_budget_is_fifteen():
+    assert CostLedger().budget_usd == 15.0
+
+
+def test_table_lists_stages_total_and_budget():
+    ledger = CostLedger(budget_usd=15.0)
+    ledger.record("analyze", "opus", 1.5)
+    ledger.record("plan", "sonnet", 0.25)
+    assert render_table(ledger).splitlines() == [
+        "| stage | model | cost_usd |",
+        "|---|---|---|",
+        "| analyze | opus | 1.5000 |",
+        "| plan | sonnet | 0.2500 |",
+        "",
+        "Total: $1.7500 of $15.00 budget",
+    ]
+
+
+def test_table_shows_earlier_runs_as_one_row():
+    ledger = CostLedger(prior_usd=1.0)
+    ledger.record("test", "sonnet", 0.5)
+    assert "| earlier runs | - | 1.0000 |" in render_table(ledger)
+    assert "Total: $1.5000" in render_table(ledger)
+
+
+def test_prior_total_reads_the_rendered_table():
+    ledger = CostLedger(prior_usd=1.0)
+    ledger.record("test", "sonnet", 0.5)
+    assert prior_total(render_table(ledger)) == 1.5
+
+
+@pytest.mark.parametrize("comment", [None, "", "no total here"])
+def test_prior_total_defaults_to_zero(comment):
+    assert prior_total(comment) == 0.0

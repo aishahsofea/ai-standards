@@ -6,7 +6,7 @@ from typing import Literal
 
 from pipeline.agent import Agent
 from pipeline.cost import CostLedger
-from pipeline.forge import Forge
+from pipeline.forge import Forge, ForgeError
 from pipeline.gates import GATES
 from pipeline.run_dir import RunDir
 
@@ -85,8 +85,8 @@ class Pipeline:
         """Runs stages in order; returns the stage it stopped at, or None when finished."""
         for stage in self._stages():
             outcome = self._execute(stage)
-            if outcome != "skipped":
-                self._publish(stage)
+            if outcome == "done":
+                self.forge.checkpoint(stage.name)
             if outcome == "blocked" or stage.name == self.stop_after:
                 return stage.name
             if not self._proceed(stage, outcome == "done"):
@@ -100,47 +100,55 @@ class Pipeline:
             f"Idea: {self.idea}",
         ]
         if stage.inputs:
-            files = "\n".join(f"- {self.run_dir.artifact_path(name)}" for name in stage.inputs)
-            parts.append(f"Input files:\n{files}")
+            paths = self.run_dir.stage_inputs({name: self._input(stage, name) for name in stage.inputs})
+            parts.append("Input files:\n" + "\n".join(f"- {path}" for path in paths))
         if stage.instruction:
             parts.append(stage.instruction)
-        output = self.run_dir.artifact_path(stage.output)
-        parts.append(f"Your final reply is saved as {output}; make it the complete document.")
+        target = "issue body" if stage.output == "issue" else f"{stage.output} comment"
+        parts.append(f"Your final reply is posted as the {target}; make it the complete document.")
         return "\n".join(parts)
+
+    def _artifact(self, name: str) -> str:
+        text = self.forge.read_artifact(name)
+        if text is None:
+            raise ForgeError(f"the '{name}' comment is missing from the issue")
+        return text
+
+    def _input(self, stage: Stage, name: str) -> str:
+        text = self._artifact(name)
+        if stage.name == PLAN.name and name == "decisions" and (replies := self.forge.human_comments_after(name)):
+            text += "\n\n## Replies on the issue\n\n" + "\n\n".join(replies)
+        return text
 
     def _stages(self) -> Iterator[Stage]:
         yield from (ISSUE, ANALYZE, DECIDE, PLAN)
-        phases = phase_count(self.run_dir.read(self.run_dir.artifact_path("plan")))
+        phases = phase_count(self._artifact("plan"))
         yield from (phase_stage(n) for n in range(1, phases + 1))
         yield from closing_stages(phases)
 
     def _execute(self, stage: Stage) -> Outcome:
-        output = self.run_dir.artifact_path(stage.output)
-        if self.run_dir.exists(output):
+        if self.forge.has_artifact(stage.output):
             return "skipped"
         self.ledger.check()
         budget = self.ledger.budget_usd - self.ledger.total()
         result = self.agent_for(stage).run(self.build_prompt(stage), stage.model, budget)
         self.ledger.record(stage.name, stage.model, result.cost_usd)
         if BLOCKED.match(result.text):
-            self.run_dir.write(self.run_dir.path / f"{stage.name}.blocked.md", result.text)
-            self.show(f"{stage.name} stopped:\n{result.text}")
+            blocked = f"{stage.name}.blocked"
+            self.show(f"{stage.name} stopped; report posted as the '{blocked}' comment on the issue:\n{result.text}")
+            self.forge.post_artifact(blocked, result.text)
             return "blocked"
-        self.run_dir.write(output, result.text)
+        if stage.output == ISSUE.output:
+            self.forge.open_issue(issue_title(result.text), result.text)
+        else:
+            self.forge.post_artifact(stage.output, result.text)
         return "done"
-
-    def _publish(self, stage: Stage) -> None:
-        if stage.name == ISSUE.name:
-            issue = self.run_dir.read(self.run_dir.artifact_path("issue"))
-            self.forge.open_issue(issue_title(issue), issue)
-        self.forge.checkpoint(stage.name)
 
     def _proceed(self, stage: Stage, ran: bool) -> bool:
         if gate := GATES.get(stage.name):
-            text = self.run_dir.read(self.run_dir.artifact_path(gate.artifact))
-            self.show(gate.preview(text))
+            self.show(gate.preview(self._artifact(gate.artifact)))
             approved = self.confirm(gate.message)
             if approved and gate.publishes:
-                self.forge.finish(text)
+                self.forge.finish(self._artifact(gate.artifact))
             return approved
         return not (ran and self.pause_each) or self.confirm(f"{stage.name} done. Continue?")
