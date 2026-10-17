@@ -62,3 +62,13 @@ def test_plan_preview_lists_titles_assumptions_and_out_of_scope():
 
 def test_plan_preview_omits_missing_sections():
     assert "Assumptions" not in plan_preview("## Phase 1: A\n")
+
+
+def test_escalated_section_hides_answered_entries():
+    decisions = "## Escalated\n- **Q1: a** — x\n  Answer: sqlite\n- **Q2: b** — y\n  Answer: _pending_\n"
+    section = escalated_section(decisions)
+    assert "Q2" in section and "Q1" not in section
+
+
+def test_escalated_section_when_all_answered():
+    assert escalated_section("## Escalated\n- **Q1: a**\n  Answer: yes\n") == "## Escalated\nAll answered."

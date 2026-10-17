@@ -324,3 +324,22 @@ def test_rerunning_a_blocked_stage_edits_the_same_comment(tmp_path):
     h.pipeline().run()
     assert h.forge.posts.count("implement-phase-2.blocked") == 2
     assert len([name for name in h.forge.artifacts if name.endswith(".blocked")]) == 1
+
+
+def test_resume_skips_gate_a_once_questions_are_answered(tmp_path):
+    h = Harness(tmp_path, answers=lambda q: "Escalated" not in q)
+    h.pipeline().run()
+    h.forge.artifacts["decisions"] = "## Escalated\n- **Q1: a**\n  Answer: sqlite\n"
+    h.questions.clear()
+    h.answers = None
+    h.pipeline().run()
+    assert not any("Escalated" in q for q in h.questions)
+
+
+def test_resume_still_asks_gate_a_while_questions_are_pending(tmp_path):
+    h = Harness(tmp_path, answers=lambda q: "Escalated" not in q)
+    h.pipeline().run()
+    h.questions.clear()
+    h.answers = None
+    h.pipeline().run()
+    assert sum("Escalated" in q for q in h.questions) == 1

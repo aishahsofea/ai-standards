@@ -168,7 +168,10 @@ class Pipeline:
 
     def _proceed(self, stage: Stage, ran: bool) -> bool:
         if gate := GATES.get(stage.name):
-            self.show(gate.preview(self._artifact(gate.artifact)))
+            artifact = self._artifact(gate.artifact)
+            if not ran and not gate.needs_input(artifact):
+                return True
+            self.show(gate.preview(artifact))
             approved = self.confirm(gate.message)
             if approved and gate.publishes:
                 self.forge.finish(self._artifact(gate.artifact))
