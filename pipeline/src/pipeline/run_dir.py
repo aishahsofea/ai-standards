@@ -1,7 +1,12 @@
 import re
+import shutil
+import tempfile
 from pathlib import Path
 
-ARTIFACT_NAME = re.compile(r"issue|analysis|decisions|plan|test-report|pr|phase-[1-9]\d*-summary")
+STAGE_NAME = r"issue|analyze|decide|plan|implement-phase-[1-9]\d*|test|docs"
+ARTIFACT_NAME = re.compile(
+    rf"issue|analysis|decisions|plan|test-report|pr|cost|phase-[1-9]\d*-summary|(?:{STAGE_NAME})\.blocked"
+)
 MAX_SLUG_LENGTH = 50
 
 
@@ -12,31 +17,37 @@ def slugify(idea: str) -> str:
     return slug
 
 
+def check_artifact(name: str) -> None:
+    if not ARTIFACT_NAME.fullmatch(name):
+        raise ValueError(f"unknown artifact: {name}")
+
+
 class RunDir:
     def __init__(self, repo: Path, slug: str) -> None:
         self.slug = slug
         self.path = repo / ".agent" / "runs" / slug
         self.path.mkdir(parents=True, exist_ok=True)
+        self._staging: Path | None = None
 
     @classmethod
     def from_idea(cls, repo: Path, idea: str) -> "RunDir":
         return cls(repo, slugify(idea))
 
-    def artifact_path(self, name: str) -> Path:
-        if ARTIFACT_NAME.fullmatch(name):
-            return self.path / f"{name}.md"
-        raise ValueError(f"unknown artifact: {name}")
+    @property
+    def state_path(self) -> Path:
+        return self.path / "state.json"
 
-    def phase_summary_path(self, phase: int) -> Path:
-        if phase < 1:
-            raise ValueError("phase numbers start at 1")
-        return self.artifact_path(f"phase-{phase}-summary")
+    def stage_inputs(self, texts: dict[str, str]) -> list[Path]:
+        for name in texts:
+            check_artifact(name)
+        if self._staging is None:
+            self._staging = Path(tempfile.mkdtemp(prefix="pipeline-inputs-"))
+        paths = [self._staging / f"{name}.md" for name in texts]
+        for path, text in zip(paths, texts.values()):
+            path.write_text(text)
+        return paths
 
-    def exists(self, path: Path) -> bool:
-        return path.is_file()
-
-    def read(self, path: Path) -> str:
-        return path.read_text()
-
-    def write(self, path: Path, text: str) -> None:
-        path.write_text(text)
+    def close(self) -> None:
+        if self._staging:
+            shutil.rmtree(self._staging, ignore_errors=True)
+            self._staging = None
