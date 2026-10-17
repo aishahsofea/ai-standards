@@ -36,6 +36,13 @@ def test_stage_inputs_are_written_outside_the_repo(tmp_path):
     assert not paths[0].exists()
 
 
+def test_staging_dir_holds_the_staged_inputs(tmp_path):
+    run = RunDir(tmp_path, "feat")
+    (path,) = run.stage_inputs({"plan": "x"})
+    assert path.parent == run.staging
+    run.close()
+
+
 def test_stage_inputs_overwrite_earlier_text(tmp_path):
     run = RunDir(tmp_path, "feat")
     run.stage_inputs({"decisions": "old"})

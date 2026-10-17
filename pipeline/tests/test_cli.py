@@ -68,7 +68,7 @@ def test_cost_comment_posted_on_clean_finish(tmp_path, monkeypatch, fake_github)
     assert run_in(tmp_path) == 0
     cost = fake_github.artifacts["cost"]
     assert "| analyze | opus | 0.5000 |" in cost
-    assert "Total: $3.5000 of $15.00 budget" in cost
+    assert "Total: $4.0000 of $15.00 budget" in cost
     assert fake_github.posts[-1] == "cost"
 
 
@@ -147,3 +147,18 @@ def test_issue_cannot_combine_with_idea_or_dry_run():
         with pytest.raises(SystemExit) as exit_info:
             main(argv)
         assert exit_info.value.code == 2
+
+
+def test_eval_subcommand_prints_score_and_fails_on_bad_output(monkeypatch, capsys):
+    use_agent(monkeypatch, FakeAgent(lambda prompt: "nothing useful", cost_usd=0.1))
+    assert main(["eval", "--case", "public-api"]) == 1
+    out = capsys.readouterr().out
+    assert "FAIL public-api" in out and "Score: 0/1" in out
+
+
+def test_real_agent_may_read_skills_and_staged_inputs(tmp_path, monkeypatch, fake_github):
+    built = []
+    monkeypatch.setattr(cli, "ClaudeAgent", lambda *args: built.append(args) or FakeAgent(cli.dry_run_text))
+    run_in(tmp_path, "--stop-after", "issue")
+    add_dirs = built[0][4]
+    assert cli.SKILLS_DIR in add_dirs and len(add_dirs) == 2

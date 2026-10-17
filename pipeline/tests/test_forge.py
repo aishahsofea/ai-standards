@@ -68,8 +68,8 @@ def test_checkpoint_commits_pushes_and_opens_draft_pr_once(make):
         git_diff="x", gh_repo="main", git_rev="2", gh_pr="https://github.com/o/r/pull/9"
     )
     state.issue_url = "https://github.com/o/r/issues/7"
-    forge.checkpoint("issue")
-    forge.checkpoint("analyze")
+    forge.checkpoint("pipeline: issue")
+    forge.checkpoint("pipeline: analyze")
     assert shell.ran("git", "commit", "-m", "pipeline: issue")
     assert len(shell.ran("git", "push", "-u", "origin", "agent/add-dark-mode")) == 2
     assert len(shell.ran("gh", "pr", "create", "--draft")) == 1

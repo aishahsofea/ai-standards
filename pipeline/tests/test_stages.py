@@ -13,7 +13,7 @@ DECISIONS = "## Decided\n- x\n## Escalated\n1. Pick a data model?\n"
 PLAN_INPUTS: list[str] = []
 STAGE_ORDER = [
     "issue", "analyze", "decide", "plan",
-    "implement-phase-1", "implement-phase-2", "test", "docs",
+    "implement-phase-1", "implement-phase-2", "test", "review", "docs",
 ]
 
 
@@ -30,6 +30,12 @@ def respond(prompt):
         return DECISIONS
     if "/forge-cli/SKILL.md" in prompt:
         return "# Add dark mode\n\nbody"
+    if "/implement-phase/SKILL.md" in prompt:
+        return "Status: done\nok"
+    if "/test/SKILL.md" in prompt:
+        return "Status: pass\nok"
+    if "/review/SKILL.md" in prompt:
+        return "Status: pass\nok"
     return "content"
 
 
@@ -39,6 +45,9 @@ class Harness:
         self.run_dir = RunDir(tmp_path, "feat")
         self.ledger = CostLedger(budget)
         self.block_phase_2 = False
+        self.phase_1_reply = None
+        self.plan = None
+        self.review_reply = None
         self.agent = FakeAgent(self._respond, cost_usd=cost)
         self.forge = FakeForge()
         self.questions: list[str] = []
@@ -49,6 +58,12 @@ class Harness:
     def _respond(self, prompt):
         if self.block_phase_2 and "Implement only phase 2" in prompt:
             return "Status: blocked - tests fail twice"
+        if self.phase_1_reply and "Implement only phase 1" in prompt:
+            return self.phase_1_reply
+        if self.review_reply and "/review/SKILL.md" in prompt:
+            return self.review_reply
+        if self.plan and "/plan/SKILL.md" in prompt:
+            return self.plan
         return respond(prompt)
 
     def confirm(self, question):
@@ -81,11 +96,11 @@ def test_dry_run_walks_every_stage(tmp_path):
     assert h.pipeline().run() is None
     assert set(h.forge.artifacts) == {
         "issue", "analysis", "decisions", "plan", "phase-1-summary",
-        "phase-2-summary", "test-report", "pr",
+        "phase-2-summary", "test-report", "review", "pr",
     }
-    assert len(h.agent.calls) == 8
+    assert len(h.agent.calls) == 9
     assert [record[0] for record in h.ledger.records] == STAGE_ORDER
-    assert h.ledger.total() == 4.0
+    assert h.ledger.total() == 4.5
 
 
 def test_nothing_is_written_under_agent_runs(tmp_path):
@@ -107,7 +122,7 @@ def test_resume_skips_stages_with_a_comment_and_never_reposts(tmp_path):
     calls_before = len(h.agent.calls)
     h.answers = None
     assert h.pipeline().run() is None
-    assert len(h.agent.calls) - calls_before == 5
+    assert len(h.agent.calls) - calls_before == 6
     assert sum("Escalated" in q for q in h.questions) == 2
     assert sorted(h.forge.posts) == sorted(set(h.forge.posts))
 
@@ -130,6 +145,16 @@ def test_pause_each_off_only_asks_at_gates(tmp_path):
     h = Harness(tmp_path, pause_each=False)
     h.pipeline().run()
     assert len(h.questions) == 2
+
+
+def test_plan_prompt_shows_preview_and_declining_stops(tmp_path):
+    h = Harness(tmp_path, answers=lambda q: not q.startswith("plan done"))
+    h.plan = "## Assumptions\n- a1\n## Phase 1: schema\n## Out of scope\n- o1\n"
+    assert h.pipeline().run() == "plan"
+    preview = h.shown[-1]
+    assert "1. schema" in preview and "a1" in preview and "o1" in preview
+    assert h.questions[-1].startswith("plan done")
+    assert "implement-phase-1" not in h.called_stages()
 
 
 def test_stop_after(tmp_path):
@@ -188,8 +213,11 @@ def test_phase_count_rejects_bad_plans(plan):
 def test_forge_gets_issue_then_checkpoint_per_executed_stage(tmp_path):
     h = Harness(tmp_path)
     h.pipeline().run()
-    assert h.forge.calls[:2] == [("open_issue", "Add dark mode"), ("checkpoint", "issue")]
-    assert [c[1] for c in h.forge.calls if c[0] == "checkpoint"] == STAGE_ORDER
+    assert h.forge.calls[:2] == [("open_issue", "Add dark mode"), ("checkpoint", "pipeline: issue")]
+    assert [c[1] for c in h.forge.calls if c[0] == "checkpoint"] == [
+        {"implement-phase-1": "phase 1: a", "implement-phase-2": "phase 2: b"}.get(name, f"pipeline: {name}")
+        for name in STAGE_ORDER
+    ]
     assert h.forge.calls[-1] == ("finish", "content")
 
 
@@ -229,13 +257,40 @@ def test_plan_input_without_replies_is_the_decisions_comment(tmp_path):
     assert PLAN_INPUTS == [DECISIONS]
 
 
+def test_each_phase_gets_its_own_titled_checkpoint(tmp_path):
+    h = Harness(tmp_path)
+    h.plan = "# Plan\n## Phase 1: schema\n## Phase 2: api\n### Phase 3: ui\n"
+    h.pipeline().run()
+    commits = [c[1] for c in h.forge.calls if c[0] == "checkpoint" and c[1].startswith("phase")]
+    assert commits == ["phase 1: schema", "phase 2: api", "phase 3: ui"]
+
+
+def test_failed_review_blocks_and_docs_never_runs(tmp_path):
+    h = Harness(tmp_path)
+    h.review_reply = "Status: fail\n- Critical: SQL injection"
+    assert h.pipeline().run() == "review"
+    assert "SQL injection" in h.forge.artifacts["review.blocked"]
+    assert not h.forge.has_artifact("review")
+    assert "docs" not in h.called_stages()
+
+
+def test_review_is_read_only_and_docs_reads_it(tmp_path):
+    from pipeline.stages import closing_stages
+
+    test, review, docs = closing_stages(2)
+    assert review.read_only and not test.read_only
+    assert (review.model, review.max_turns, review.statuses) == ("opus", 30, ("pass", "fail"))
+    assert review.inputs == ("issue", "plan", "phase-1-summary", "phase-2-summary", "test-report")
+    assert "review" in docs.inputs
+
+
 def test_resume_does_not_checkpoint_skipped_stages(tmp_path):
     h = Harness(tmp_path, stop_after="analyze")
     h.pipeline().run()
     h.forge.calls.clear()
     h.options = {"stop_after": "decide"}
     h.pipeline().run()
-    assert h.forge.calls == [("checkpoint", "decide")]
+    assert h.forge.calls == [("checkpoint", "pipeline: decide")]
 
 
 def test_blocked_stage_posts_report_without_checkpoint_and_reruns_on_resume(tmp_path):
@@ -245,11 +300,21 @@ def test_blocked_stage_posts_report_without_checkpoint_and_reruns_on_resume(tmp_
     assert "tests fail twice" in h.forge.artifacts["implement-phase-2.blocked"]
     assert "implement-phase-2.blocked" in h.shown[-1]
     assert not h.forge.has_artifact("phase-2-summary")
-    assert ("checkpoint", "implement-phase-2") not in h.forge.calls
-    assert ("checkpoint", "implement-phase-1") in h.forge.calls
+    assert ("checkpoint", "phase 2: b") not in h.forge.calls
+    assert ("checkpoint", "phase 1: a") in h.forge.calls
     h.block_phase_2 = False
     assert h.pipeline().run() is None
-    assert ("checkpoint", "implement-phase-2") in h.forge.calls
+    assert ("checkpoint", "phase 2: b") in h.forge.calls
+
+
+@pytest.mark.parametrize("reply", ["no status here", "Status: maybe", "Status: pass"])
+def test_missing_or_invalid_status_blocks_phase(tmp_path, reply):
+    h = Harness(tmp_path)
+    h.phase_1_reply = reply
+    assert h.pipeline().run() == "implement-phase-1"
+    assert reply in h.forge.artifacts["implement-phase-1.blocked"]
+    assert "Status: done|blocked" in h.forge.artifacts["implement-phase-1.blocked"]
+    assert not h.forge.has_artifact("phase-1-summary")
 
 
 def test_rerunning_a_blocked_stage_edits_the_same_comment(tmp_path):
