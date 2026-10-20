@@ -1,4 +1,4 @@
-from pipeline.gates import confirm, escalated_section, plan_preview
+from pipeline.gates import answer_escalated, confirm, escalated_section, plan_preview
 
 DECISIONS = """# Decisions
 
@@ -72,3 +72,21 @@ def test_escalated_section_hides_answered_entries():
 
 def test_escalated_section_when_all_answered():
     assert escalated_section("## Escalated\n- **Q1: a**\n  Answer: yes\n") == "## Escalated\nAll answered."
+
+
+def test_answer_escalated_writes_typed_and_recommended_answers_and_skips_blank():
+    decisions = (
+        "## Escalated\n"
+        "- **Q1: a?** Recommendation: A, simplest.\n  Answer: _pending_\n"
+        "- **Q2: b?** Recommendation: B.\n  Answer: _pending_\n"
+        "- **Q3: c?**\n  Answer: _pending_\n"
+    )
+    replies = iter(["r", "use Postgres", ""])
+    updated = answer_escalated(decisions, lambda _: next(replies))
+    assert "Answer: A, simplest." in updated
+    assert "Answer: use Postgres" in updated
+    assert "Q3: c?**\n  Answer: _pending_" in updated
+
+
+def test_answer_escalated_adds_missing_answer_line():
+    assert answer_escalated("## Escalated\n1. Pick?\n", lambda _: "sqlite").strip().endswith("Answer: sqlite")

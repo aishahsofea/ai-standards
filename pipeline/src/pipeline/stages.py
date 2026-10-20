@@ -91,6 +91,7 @@ class Pipeline:
     forge: Forge
     stop_after: str | None = None
     pause_each: bool = True
+    ask: Callable[[str], str] | None = None
 
     def run(self) -> str | None:
         """Runs stages in order; returns the stage it stopped at, or None when finished."""
@@ -172,6 +173,8 @@ class Pipeline:
             if not ran and not gate.needs_input(artifact):
                 return True
             self.show(gate.preview(artifact))
+            if self.ask and gate.answer and (updated := gate.answer(artifact, self.ask)) != artifact:
+                self.forge.post_artifact(gate.artifact, updated)
             approved = self.confirm(gate.message)
             if approved and gate.publishes:
                 self.forge.finish(self._artifact(gate.artifact))
