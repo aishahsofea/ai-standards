@@ -79,6 +79,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     pipeline = Pipeline(
         run_dir, ledger, agent_for, SKILLS_DIR, state.idea,
         (lambda _: True) if args.dry_run else confirm, print, forge, stop_after=args.stop_after,
+        ask=None if args.dry_run else input,
     )
     try:
         stopped = pipeline.run()

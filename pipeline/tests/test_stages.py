@@ -252,6 +252,13 @@ def test_gate_a_picks_up_an_edited_decisions_comment_and_later_replies(tmp_path)
     assert "also keep it offline" in seen
 
 
+def test_gate_a_terminal_answers_are_posted_to_the_decisions_comment(tmp_path):
+    h = Harness(tmp_path, ask=lambda _: "sqlite")
+    h.pipeline().run()
+    assert "Answer: sqlite" in h.forge.artifacts["decisions"]
+    assert (seen := PLAN_INPUTS[-1]) and "Answer: sqlite" in seen
+
+
 def test_plan_input_without_replies_is_the_decisions_comment(tmp_path):
     Harness(tmp_path).pipeline().run()
     assert PLAN_INPUTS == [DECISIONS]
