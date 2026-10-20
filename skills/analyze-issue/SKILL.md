@@ -47,6 +47,9 @@ implementation phase.
    smaller phases over fewer large ones.
 2. For each phase list: **goal**, **files touched**, **what changes**, and **how
    it's verified** (test/command). Keep the diff tight; defer unrelated cleanup.
+   A phase's `Verify` must be a command a headless agent can run. Put checks that need a
+   browser or a person under a separate `Manual checks` list for the PR, never as a phase's
+   `Verify`, and never make a code change conditional on one. Pick the safe default.
 3. Present the full phase list and **stop for approval** before implementing.
 
 ## Implementation loop (per phase)
