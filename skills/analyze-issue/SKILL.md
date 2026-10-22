@@ -12,14 +12,7 @@ implementation phase.
 ## Mode
 
 - **Interactive** (default): follow every stage and gate below.
-- **Headless** (the prompt says to run non-interactively): do Stage 1 only, with no
-  gates. Read the issue from the input file or link given in the prompt, never ask
-  questions, and make your final reply the findings document. Use a `##` heading
-  for each section of step 3. Under `## Open questions` number each question
-  `- **Q1:** ...`, `- **Q2:** ...` (or write `None.`) so a later stage can answer
-  them. Cite code as `` `path/from/repo/root:line` ``; the pipeline rejects
-  references to missing files or lines. Do not write a plan, write files, or
-  change code.
+- **Headless**: use the `analyze` skill instead; this file is interactive only.
 
 ## Stage 1 — Analyze & report findings
 
@@ -31,14 +24,14 @@ implementation phase.
 2. **Research the current code.** Locate the files, modules, and tests the issue
    touches. Read enough to understand actual behavior — do not guess. Honor any
    `AGENTS.md`/`AGENTS.md`/`CONTEXT.md` in the repo.
-3. **Report findings** (interactive: chat only, no files written; headless: the final reply). Use this structure:
+3. **Report findings** (chat only, no files written). Use this structure:
    - **Problem** — what the issue asks for, in your own words.
    - **Current state** — how the relevant code works today, with `file:line` refs.
    - **Proposed changes** — what needs to change and where.
    - **Effort** — rough size (S/M/L) with a one-line justification.
    - **Risk** — what could break, blast radius, migration/compat concerns, test gaps.
    - **Open questions** — anything ambiguous in the issue or code.
-4. **Stop and wait** (interactive only). Ask the human to confirm or correct the findings. Do **not**
+4. **Stop and wait.** Ask the human to confirm or correct the findings. Do **not**
    write a plan or any code yet.
 
 ## Stage 2 — Phased implementation plan (only after findings are approved)

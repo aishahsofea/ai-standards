@@ -1,6 +1,6 @@
 import pytest
 
-from pipeline.gates import GateError, answer_escalated, confirm, decisions_preview, escalated_entries, escalated_section, plan_preview
+from pipeline.gates import GATE_A, GateError, answer_escalated, confirm, decisions_preview, escalated_entries, escalated_section, plan_preview
 
 DECISIONS = """# Decisions
 
@@ -114,3 +114,17 @@ def test_escalated_entries_fail_loudly_when_unreadable(decisions):
 
 def test_escalated_none_means_no_entries():
     assert escalated_entries("## Escalated\nNone.\n") == []
+
+
+def test_answer_escalated_multi_line_reply_reads_until_blank_line():
+    replies = iter(["m", "use Postgres", "and keep a rollback", ""])
+    updated = answer_escalated("## Escalated\n- **Q1: a?**\n  Answer: _pending_\n", lambda _: next(replies))
+    assert "Answer: use Postgres\n    and keep a rollback" in updated
+    assert not escalated_entries(updated)
+
+
+def test_answer_escalated_bang_marks_the_answer_for_revisit():
+    updated = answer_escalated("## Escalated\n- **Q1: a?**\n  Answer: _pending_\n", lambda _: "!use Postgres")
+    assert "Answer: [revisit] use Postgres" in updated
+    assert GATE_A.needs_rerun(updated)
+    assert not GATE_A.needs_rerun(updated.replace("[revisit] ", ""))

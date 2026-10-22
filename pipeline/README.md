@@ -49,7 +49,7 @@ Before a stage runs, the pipeline copies its input comments into a temp folder o
 | Stage | Skill | Model | Reads | Posts |
 |---|---|---|---|---|
 | issue | `forge-cli` | sonnet | the idea | the issue body |
-| analyze | `analyze-issue` | opus | issue | `analysis` |
+| analyze | `analyze` | opus | issue | `analysis` |
 | decide | `decide` | opus | issue, analysis | `decisions` |
 | plan | `plan` | opus | issue, analysis, decisions | `plan` |
 | implement-phase-N | `implement-phase` | sonnet | plan, earlier summaries | `phase-N-summary` |
@@ -75,7 +75,7 @@ A comment over GitHub's 65,536-character limit stops the run with an error namin
 
 ## Gates
 
-- **Gate A**, after `decide`: the run prints the decided items, then the open part of the `## Escalated` section of the `decisions` comment. It stops, even if you approve, while any escalated question is unanswered, and errors if `## Escalated` is missing or unreadable. The run asks for each open question in the terminal: type an answer, `r` to accept the recommendation, or Enter to skip. Answers are written back to the comment. You can also edit the comment on GitHub, or reply in a new comment. After you approve, the plan stage reads the edited comment and any later replies.
+- **Gate A**, after `decide`: the run prints the decided items, then the open part of the `## Escalated` section of the `decisions` comment. It stops, even if you approve, while any escalated question is unanswered, and errors if `## Escalated` is missing or unreadable. The run asks for each open question in the terminal: type an answer, `r` to accept the recommendation, `m` for a multi-line answer (end with a blank line), or Enter to skip. Start with `!` when the answer changes an earlier decision: `decide` then reruns once with the answers and revises the affected items. Answers are written back to the comment. You can also edit the comment on GitHub, or reply in a new comment. After you approve, the plan stage reads the edited comment and any later replies.
 - **Gate B**, after `docs`: the run prints the `pr` comment. Approving puts its current text in the PR description and marks the PR ready. Merging is still manual.
 
 ## What lands on GitHub
@@ -122,7 +122,7 @@ The pipeline passes each agent the full path to its skill file, so no install is
 To use the new skills in interactive Claude Code sessions, link the ones you do not already have:
 
 ```sh
-for skill in decide plan implement-phase test review docs; do
+for skill in analyze decide plan implement-phase test review docs; do
   [ -e ~/.claude/skills/$skill ] || ln -s "$PWD/skills/$skill" ~/.claude/skills/$skill
 done
 ```
