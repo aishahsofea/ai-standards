@@ -18,7 +18,8 @@ Verify the finished feature end to end. Headless (the prompt says to run non-int
    - Selection and copy: select the text with a mouse drag, assert `getSelection().toString()` and `getComputedStyle(el, "::selection")`, and assert Cmd/Ctrl+C puts it on the clipboard.
    - Drag, click, and keys: perform the input and assert the resulting state and computed styles.
    Keep the spec as the feature's automated test. If Playwright is missing, do not install it: list those checks under Manual checks.
-6. Map each acceptance criterion in the issue to the test or command that covers it. A criterion only a person can judge (visual polish, focus-ring clipping, feel) goes under Manual checks. Mark any other uncovered criterion as `Not covered`. A test that only checks a class name or attribute does not cover a criterion about what the user sees or does.
+6. Prove each new behavior's test can fail: break the behavior with one small edit (invert a condition, drop the new style rule), run that test, then undo the edit. A test that stays green does not cover its criterion. Before reporting, `git diff` must show none of these edits.
+7. Map each acceptance criterion in the issue to the test or command that covers it. A criterion only a person can judge (visual polish, focus-ring clipping, feel) goes under Manual checks. Mark any other uncovered criterion as `Not covered`. A test that only checks a class name or attribute does not cover a criterion about what the user sees or does.
 
 ## Rules
 
@@ -37,13 +38,14 @@ Verify the finished feature end to end. Headless (the prompt says to run non-int
 | "The lint warning is only style." | A failing lint command is a failing check. |
 | "I could not run it, but the code looks right." | List it as not run. It is not a pass. |
 | "Most criteria are covered, so the status is pass." | One `Not covered` criterion is `Status: fail`. |
+| "The test clearly checks it; no need to break the code." | A test that only checks a class name passes while the bug is live. Break it and watch it fail. |
 
 ## Report format
 
 The first line must be exactly `Status: pass` or `Status: fail`. Use `fail` if any command fails or any acceptance criterion is `Not covered`. In a repo with Playwright, a criterion a browser can check that you left as a Manual check counts as `Not covered`. Any other first line stops the run as blocked. Then:
 
 - **Commands** — each command with pass or fail.
-- **Acceptance criteria** — each criterion with its covering test, `Manual check`, or `Not covered`.
+- **Acceptance criteria** — each criterion with its covering test and the edit that made it fail, `Manual check`, or `Not covered`.
 - **Manual checks** — a `- [ ]` checklist for the PR: each check, the viewports it needs, and what to look for. Include the plan's `Manual checks`. `None.` if empty.
 - **Definition of done** — each item met, or `Not met` with the reason.
 - **Failures** — the relevant output excerpt for each remaining failure, or `None.`

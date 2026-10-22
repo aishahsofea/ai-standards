@@ -73,7 +73,7 @@ A failing reply is sent back once with the list of problems. If it still fails, 
 
 A comment over GitHub's 65,536-character limit stops the run with an error naming the artifact.
 
-`test` fails when an acceptance criterion has no covering test. In a repo with Playwright, a criterion a browser can check must have a passing Playwright spec; `implement-phase` writes and runs those specs too. `test` and `review` also check the work against `DEFINITION_OF_DONE.md` in the target repo's root. Without that file they use the 8-line default in [`skills/DEFINITION_OF_DONE.md`](../skills/DEFINITION_OF_DONE.md). Unmet items appear in their reports.
+`test` fails when an acceptance criterion has no covering test, or when its test still passes after `test` breaks the behavior on purpose. In a repo with Playwright, a criterion a browser can check must have a passing Playwright spec; `implement-phase` writes and runs those specs too. `test` and `review` also check the work against `DEFINITION_OF_DONE.md` in the target repo's root. Without that file they use the 8-line default in [`skills/DEFINITION_OF_DONE.md`](../skills/DEFINITION_OF_DONE.md). Unmet items appear in their reports.
 
 ## Gates
 
