@@ -1,0 +1,8 @@
+.submit {
+  padding: 8px 16px;
+}
+
+.is-loading {
+  opacity: 0.6;
+  cursor: progress;
+}

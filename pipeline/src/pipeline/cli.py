@@ -7,7 +7,7 @@ from pathlib import Path
 from pipeline.agent import AgentError, FakeAgent
 from pipeline.claude_agent import ClaudeAgent
 from pipeline.cost import DEFAULT_BUDGET_USD, BudgetExceeded, CostLedger, prior_total, render_table
-from pipeline.evals import render_results, run_evals
+from pipeline.evals import render_results, run_evals, run_review_evals
 from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue
 from pipeline.gates import GateError, confirm
 from pipeline.node_bin import NodeNotFound, resolve_node_bin
@@ -36,8 +36,9 @@ def dry_run_text(prompt: str) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pipeline")
     commands = parser.add_subparsers(dest="command", required=True)
-    evals = commands.add_parser("eval", help="score the decide and plan skills on fixture cases (spends money)")
+    evals = commands.add_parser("eval", help="score the decide and plan, or review, skills on fixture cases (spends money)")
     evals.add_argument("--case", action="append", default=[], metavar="NAME", help="only this case (repeatable)")
+    evals.add_argument("--suite", choices=("decide", "review"), default="decide", help="decide scores decide and plan (default)")
     run = commands.add_parser("run", help="run the feature pipeline")
     run.add_argument("idea", nargs="?", help="the feature idea")
     run.add_argument("--issue", metavar="REF", help="start from an existing GitHub issue (number or URL)")
@@ -101,10 +102,17 @@ def run_pipeline(args: argparse.Namespace) -> int:
 
 def run_eval(args: argparse.Namespace) -> int:
     with tempfile.TemporaryDirectory(prefix="pipeline-eval-") as workdir:
-        results = run_evals(
-            args.case, lambda staging: ClaudeAgent(Path(workdir), 30, AGENT_TIMEOUT_S, True, (SKILLS_DIR, staging)),
-            SKILLS_DIR, Path(workdir),
-        )
+        if args.suite == "review":
+            results = run_review_evals(
+                args.case,
+                lambda repo, staging: ClaudeAgent(repo, 30, AGENT_TIMEOUT_S, True, (SKILLS_DIR, staging), allowed_tools=allowed_tools(repo, True)),
+                SKILLS_DIR, Path(workdir),
+            )
+        else:
+            results = run_evals(
+                args.case, lambda staging: ClaudeAgent(Path(workdir), 30, AGENT_TIMEOUT_S, True, (SKILLS_DIR, staging)),
+                SKILLS_DIR, Path(workdir),
+            )
     print(render_results(results))
     return int(any(result.failures for result in results))
 
