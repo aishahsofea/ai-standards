@@ -67,7 +67,7 @@ A comment over GitHub's 65,536-character limit stops the run with an error namin
 
 ## Gates
 
-- **Gate A**, after `decide`: the run prints the `## Escalated` section of the `decisions` comment. The run asks for each open question in the terminal: type an answer, `r` to accept the recommendation, or Enter to skip. Answers are written back to the comment. You can also edit the comment on GitHub, or reply in a new comment. After you approve, the plan stage reads the edited comment and any later replies.
+- **Gate A**, after `decide`: the run prints the decided items, then the open part of the `## Escalated` section of the `decisions` comment. It stops, even if you approve, while any escalated question is unanswered, and errors if `## Escalated` is missing or unreadable. The run asks for each open question in the terminal: type an answer, `r` to accept the recommendation, or Enter to skip. Answers are written back to the comment. You can also edit the comment on GitHub, or reply in a new comment. After you approve, the plan stage reads the edited comment and any later replies.
 - **Gate B**, after `docs`: the run prints the `pr` comment. Approving puts its current text in the PR description and marks the PR ready. Merging is still manual.
 
 ## What lands on GitHub

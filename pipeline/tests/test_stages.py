@@ -53,7 +53,7 @@ class Harness:
         self.questions: list[str] = []
         self.shown: list[str] = []
         self.answers = answers
-        self.options = options
+        self.options = {"ask": lambda _: "sqlite", **options}
 
     def _respond(self, prompt):
         if self.block_phase_2 and "Implement only phase 2" in prompt:
@@ -117,13 +117,14 @@ def test_gate_a_shows_escalated_questions_and_stops_on_no(tmp_path):
 
 
 def test_resume_skips_stages_with_a_comment_and_never_reposts(tmp_path):
-    h = Harness(tmp_path, answers=lambda q: "Escalated" not in q)
+    h = Harness(tmp_path, answers=lambda q: "Escalated" not in q, ask=None)
     h.pipeline().run()
     calls_before = len(h.agent.calls)
+    h.forge.artifacts["decisions"] += "  Answer: sqlite\n"
     h.answers = None
     assert h.pipeline().run() is None
     assert len(h.agent.calls) - calls_before == 6
-    assert sum("Escalated" in q for q in h.questions) == 2
+    assert sum("Escalated" in q for q in h.questions) == 1
     assert sorted(h.forge.posts) == sorted(set(h.forge.posts))
 
 
@@ -261,7 +262,7 @@ def test_gate_a_terminal_answers_are_posted_to_the_decisions_comment(tmp_path):
 
 def test_plan_input_without_replies_is_the_decisions_comment(tmp_path):
     Harness(tmp_path).pipeline().run()
-    assert PLAN_INPUTS == [DECISIONS]
+    assert PLAN_INPUTS == [DECISIONS.replace("1. Pick a data model?\n", "1. Pick a data model?\n  Answer: sqlite\n")]
 
 
 def test_each_phase_gets_its_own_titled_checkpoint(tmp_path):
@@ -344,9 +345,25 @@ def test_resume_skips_gate_a_once_questions_are_answered(tmp_path):
 
 
 def test_resume_still_asks_gate_a_while_questions_are_pending(tmp_path):
-    h = Harness(tmp_path, answers=lambda q: "Escalated" not in q)
+    h = Harness(tmp_path, answers=lambda q: "Escalated" not in q, ask=None)
     h.pipeline().run()
     h.questions.clear()
     h.answers = None
     h.pipeline().run()
     assert sum("Escalated" in q for q in h.questions) == 1
+
+
+def test_gate_a_refuses_to_continue_while_questions_are_unanswered(tmp_path):
+    h = Harness(tmp_path, ask=lambda _: "")
+    assert h.pipeline().run() == "decide"
+    assert "still have no answer" in h.shown[-1]
+    assert not h.forge.has_artifact("plan")
+
+
+def test_gate_a_continues_when_answers_are_added_on_github_before_approving(tmp_path):
+    def approve(question):
+        h.forge.artifacts["decisions"] = "## Escalated\n1. Pick a data model?\nAnswer: sqlite"
+        return True
+
+    h = Harness(tmp_path, ask=lambda _: "", answers=approve)
+    assert h.pipeline().run() is None

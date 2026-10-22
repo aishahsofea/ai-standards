@@ -1,4 +1,6 @@
-from pipeline.gates import answer_escalated, confirm, escalated_section, plan_preview
+import pytest
+
+from pipeline.gates import GateError, answer_escalated, confirm, decisions_preview, escalated_entries, escalated_section, plan_preview
 
 DECISIONS = """# Decisions
 
@@ -90,3 +92,25 @@ def test_answer_escalated_writes_typed_and_recommended_answers_and_skips_blank()
 
 def test_answer_escalated_adds_missing_answer_line():
     assert answer_escalated("## Escalated\n1. Pick?\n", lambda _: "sqlite").strip().endswith("Answer: sqlite")
+
+
+def test_decisions_preview_lists_decided_items_before_escalations():
+    decisions = "## Decided from evidence\n- **Q1: a** — x\n## Decided, low stakes\n- **Q2: b** — y\n## Escalated\n- **Q3: c**\n  Answer: _pending_\n"
+    preview = decisions_preview(decisions)
+    assert preview.index("Q1") < preview.index("Q2") < preview.index("Q3")
+
+
+@pytest.mark.parametrize("entry", ["1) Pick?", "### Escalated\n", "**Q1: Pick?**"])
+def test_escalated_entries_accept_format_variants(entry):
+    text = f"## Escalated\n{entry}" if "Escalated" not in entry else f"## Decided\n- x\n{entry}1. Pick?\n"
+    assert len(escalated_entries(text)) == 1
+
+
+@pytest.mark.parametrize("decisions", ["## Decided\n- x\n", "## Escalated\nsome prose, no list\n"])
+def test_escalated_entries_fail_loudly_when_unreadable(decisions):
+    with pytest.raises(GateError):
+        escalated_entries(decisions)
+
+
+def test_escalated_none_means_no_entries():
+    assert escalated_entries("## Escalated\nNone.\n") == []

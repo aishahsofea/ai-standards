@@ -9,7 +9,7 @@ from pipeline.claude_agent import ClaudeAgent
 from pipeline.cost import DEFAULT_BUDGET_USD, BudgetExceeded, CostLedger, prior_total, render_table
 from pipeline.evals import render_results, run_evals
 from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue
-from pipeline.gates import confirm
+from pipeline.gates import GateError, confirm
 from pipeline.node_bin import NodeNotFound, resolve_node_bin
 from pipeline.permissions import allowed_tools
 from pipeline.run_dir import RunDir, slugify
@@ -122,6 +122,6 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--dry-run cannot resume or use --issue")
     try:
         return run_pipeline(args)
-    except (AgentError, BudgetExceeded, ForgeError, NodeNotFound) as error:
+    except (AgentError, BudgetExceeded, ForgeError, GateError, NodeNotFound) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
