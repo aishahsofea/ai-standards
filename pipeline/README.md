@@ -58,21 +58,22 @@ Before a stage runs, the pipeline copies its input comments into a temp folder o
 | fix | `fix` | sonnet | issue, plan, test report, failed review | `fix-summary` |
 | docs | `docs` | sonnet | plan, summaries, test report, review | `pr` |
 
-`review` cannot edit files. It labels findings Critical, Required or Nit and starts with `Status: pass`, or `Status: fail` if any finding is Critical or Required. A fail runs one fix round: `fix` applies the Critical and Required findings, then `test` and `review` run again, with the review also reading `fix-summary`. If any of the three blocks or fails, the run stops and `docs` does not run until `--resume` passes the review. Each `--resume` that fails the review gets one more fix round.
+`review` cannot edit files. It labels findings Critical, Required or Nit and starts with `Status: pass`, or `Status: fail` if any finding is Critical or Required. A fail runs one fix round: `fix` applies the Critical and Required findings, then `test` and `review` run again, with the review also reading `fix-summary`. If any of the three blocks or fails, the run stops and `docs` does not run until `--resume` passes the review. A `--resume` after a failed review starts with another fix round, not a fresh review, and the review after it reads the failed `review.blocked` so its findings carry over.
 
 `decide` sorts each open question into one of three groups: decided from code, decided and recorded as low-risk, or escalated to you.
 
-After `analyze` and `decide` the pipeline checks the reply before posting it:
+After `analyze`, `decide` and `plan` the pipeline checks the reply before posting it:
 
 - `analyze` needs an `## Open questions` section, numbered `Q1`, `Q2`, ... or `None.`.
 - `decide` needs `## Decided from evidence`, `## Decided, low stakes` and a readable `## Escalated`, with a decision for every `Q#` in the analysis.
-- Every backticked `path:line` reference in either reply must point to an existing file and a line inside it.
+- `plan` needs a `Verify:` line in every phase with no manual step in it, and an `## Acceptance criteria` section that maps each criterion to an existing `Phase N` or marks it `Manual:`.
+- Every backticked `path:line` reference in the `analyze` or `decide` reply must point to an existing file and a line inside it.
 
 A failing reply is sent back once with the list of problems. If it still fails, the run stops and the reply is posted as the `<stage>.blocked` comment; `--resume` runs the stage again. The retry is billed like any other call.
 
 A comment over GitHub's 65,536-character limit stops the run with an error naming the artifact.
 
-`test` and `review` also check the work against `DEFINITION_OF_DONE.md` in the target repo's root. Without that file they use the 8-line default in [`skills/DEFINITION_OF_DONE.md`](../skills/DEFINITION_OF_DONE.md). Unmet items appear in their reports.
+`test` fails when an acceptance criterion has no covering test. In a repo with Playwright, a criterion a browser can check must have a passing Playwright spec; `implement-phase` writes and runs those specs too. `test` and `review` also check the work against `DEFINITION_OF_DONE.md` in the target repo's root. Without that file they use the 8-line default in [`skills/DEFINITION_OF_DONE.md`](../skills/DEFINITION_OF_DONE.md). Unmet items appear in their reports.
 
 ## Gates
 
@@ -110,7 +111,7 @@ Runs the real `decide` and `plan` skills on the fixture cases in `evals/cases/` 
 
 - every question lands in an allowed bucket (for example, a question about a public API must be escalated), and
 - the decisions pass the structure check above (headings present, every `Q#` answered), and
-- the plan has numbered phases and every phase has a `Verify:` line.
+- the plan passes the plan check above (numbered phases, automated `Verify:` lines, acceptance criteria mapped to phases).
 
 Baseline (2026-10-17, before the anti-rationalization tables): 4/4 cases clean, about $1.64 for the four cases.
 

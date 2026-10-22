@@ -1,4 +1,4 @@
-from pipeline.validate import analysis_problems, decisions_problems, question_ids, reference_problems
+from pipeline.validate import analysis_problems, decisions_problems, plan_problems, question_ids, reference_problems
 
 ANALYSIS = "# Analysis\n\n## Current state\nSee `src/app.py:2`.\n\n## Open questions\n- **Q1:** a?\n- **Q2:** b?\n"
 DECISIONS = """# Decisions
@@ -48,3 +48,51 @@ def test_decisions_need_every_section_and_question():
 def test_decisions_report_an_unreadable_escalated_section():
     unreadable = DECISIONS.replace("- **Q2: b**", "Q2: b")
     assert any("Escalated" in problem for problem in decisions_problems(unreadable, ANALYSIS))
+
+
+PLAN = """# Plan
+
+## Phase 1: icons
+- Verify: `npx --prefix frontend vitest run Messages.test.tsx`
+
+## Phase 2: selection
+- Verify: `npx --prefix frontend playwright test selection.spec.ts`
+- Manual checks: highlight colour looks right
+
+## Acceptance criteria
+- No visible Copy text: Phase 1, `Messages.test.tsx`
+- Selection is visible and copies: Phase 2, `selection.spec.ts`
+- Icons look polished: Manual: visual judgement
+
+## Out of scope
+- dark mode
+"""
+
+
+def test_valid_plan_has_no_problems():
+    assert plan_problems(PLAN) == []
+    assert plan_problems(PLAN.replace(PLAN[PLAN.index("- No visible"):PLAN.index("## Out")], "None.\n\n")) == []
+
+
+def test_plan_needs_numbered_phases():
+    assert plan_problems("no phases") == ["number the phases '## Phase 1', '## Phase 2', ... from 1 with no gaps"]
+
+
+def test_plan_phases_need_an_automated_verify_line():
+    plan = PLAN.replace("- Verify: `npx --prefix frontend vitest run Messages.test.tsx`", "- Change: x").replace(
+        "selection.spec.ts`\n- Manual", "selection.spec.ts`, plus a manual browser check\n- Manual")
+    assert plan_problems(plan) == [
+        "phase 1 has no Verify: line",
+        "phase 2's Verify: line has a manual step; move it to a 'Manual checks:' line",
+    ]
+
+
+def test_every_acceptance_criterion_needs_a_covering_phase():
+    plan = PLAN.replace("copies: Phase 2,", "copies:").replace("text: Phase 1", "text: Phase 4")
+    assert plan_problems(plan) == [
+        "acceptance criterion names a phase that does not exist: No visible Copy text: Phase 4, `Messages.test.tsx`",
+        "no phase covers acceptance criterion: Selection is visible and copies: `selection.spec.ts`",
+    ]
+    assert plan_problems(PLAN.replace("## Acceptance criteria", "## Criteria")) == [
+        "missing a '## Acceptance criteria' section mapping each criterion to a phase"
+    ]

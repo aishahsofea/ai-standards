@@ -21,7 +21,7 @@ AGENT_TIMEOUT_S = 1800
 
 def dry_run_text(prompt: str) -> str:
     if "/plan/SKILL.md" in prompt:
-        return "# Plan\n\n## Phase 1: dry run\n"
+        return "# Plan\n\n## Phase 1: dry run\n- Verify: pytest\n\n## Acceptance criteria\n- it runs: Phase 1\n"
     if "/decide/SKILL.md" in prompt:
         return "# Decisions\n\n## Decided from evidence\nNone.\n\n## Decided, low stakes\nNone.\n\n## Escalated\nNone.\n"
     if "/analyze/SKILL.md" in prompt:

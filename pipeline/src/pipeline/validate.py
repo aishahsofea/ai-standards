@@ -1,11 +1,13 @@
 import re
 from pathlib import Path
 
-from pipeline.gates import GateError, escalated_entries, section
+from pipeline.gates import PHASE_HEADING, GateError, escalated_entries, section
 
 QUESTION = re.compile(r"(?m)^[\s\-*\d.)]*\**(Q\d+)\b")
 REFERENCE = re.compile(r"`([\w@+-]*[./][\w@./+-]*):(\d+)(?:-(\d+))?`")
 NONE = re.compile(r"(?mi)^\W*None\.?\s*$")
+VERIFY = re.compile(r"(?m)^\W*Verify:(.*)$")
+BULLET = re.compile(r"(?m)^\s*[-*] (.+)$")
 
 
 def question_ids(text: str) -> list[str]:
@@ -40,4 +42,30 @@ def decisions_problems(decisions: str, analysis: str) -> list[str]:
         problems.append(str(error))
     if unanswered := [id for id in question_ids(section(analysis, "Open questions")) if id not in question_ids(decisions)]:
         problems.append(f"no decision for {', '.join(unanswered)}")
+    return problems
+
+
+def plan_problems(plan: str) -> list[str]:
+    phases = [int(number) for number, _ in PHASE_HEADING.findall(plan)]
+    if not phases or phases != list(range(1, len(phases) + 1)):
+        return ["number the phases '## Phase 1', '## Phase 2', ... from 1 with no gaps"]
+    problems = []
+    for number, body in enumerate(re.split(r"(?m)^#{2,3} Phase \d+.*$", plan)[1:], 1):
+        verify = VERIFY.search(body)
+        if not verify:
+            problems.append(f"phase {number} has no Verify: line")
+        elif "manual" in verify[1].lower():
+            problems.append(f"phase {number}'s Verify: line has a manual step; move it to a 'Manual checks:' line")
+    criteria = section(plan, "Acceptance criteria")
+    if not criteria:
+        return [*problems, "missing a '## Acceptance criteria' section mapping each criterion to a phase"]
+    entries = BULLET.findall(criteria)
+    if not entries and not NONE.search(criteria):
+        problems.append("list each acceptance criterion as a bullet under '## Acceptance criteria'")
+    for entry in entries:
+        covering = [int(number) for number in re.findall(r"\bPhase (\d+)\b", entry)]
+        if not covering and "Manual:" not in entry:
+            problems.append(f"no phase covers acceptance criterion: {entry[:80]}")
+        elif any(number not in phases for number in covering):
+            problems.append(f"acceptance criterion names a phase that does not exist: {entry[:80]}")
     return problems
