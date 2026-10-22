@@ -29,7 +29,7 @@ def respond(prompt):
         return PLAN
     if "/decide/SKILL.md" in prompt:
         return DECISIONS
-    if "/analyze-issue/SKILL.md" in prompt:
+    if "/analyze/SKILL.md" in prompt:
         return ANALYSIS
     if "/forge-cli/SKILL.md" in prompt:
         return "# Add dark mode\n\nbody"
@@ -89,7 +89,7 @@ class Harness:
 
     @staticmethod
     def skill(stage_name):
-        return {"issue": "forge-cli", "analyze": "analyze-issue"}.get(
+        return {"issue": "forge-cli", "analyze": "analyze"}.get(
             stage_name, "implement-phase" if stage_name.startswith("implement") else stage_name)
 
 
@@ -378,7 +378,7 @@ def test_gate_a_continues_when_answers_are_added_on_github_before_approving(tmp_
 
 def test_invalid_analysis_is_retried_once_with_the_problems(tmp_path):
     h = Harness(tmp_path, stop_after="analyze")
-    h.queued["analyze-issue"] = ["# Analysis\nno questions section"]
+    h.queued["analyze"] = ["# Analysis\nno questions section"]
     assert h.pipeline().run() == "analyze"
     retry = h.agent.calls[-1][0]
     assert "missing a '## Open questions' section" in retry and "no questions section" in retry
@@ -406,6 +406,22 @@ def test_decisions_citing_a_missing_file_block(tmp_path):
 
 def test_a_blocked_analysis_reply_is_not_retried(tmp_path):
     h = Harness(tmp_path)
-    h.queued["analyze-issue"] = ["Status: blocked - issue is unreadable"]
+    h.queued["analyze"] = ["Status: blocked - issue is unreadable"]
     assert h.pipeline().run() == "analyze"
     assert len(h.agent.calls) == 2
+
+
+def test_gate_a_revisit_answer_reruns_decide_with_the_decisions_as_input(tmp_path):
+    h = Harness(tmp_path, ask=lambda _: "!sqlite")
+    h.queued["decide"] = [DECISIONS, DECISIONS + "  Answer: sqlite\n"]
+    h.pipeline().run()
+    decides = [call for call in h.agent.calls if "/decide/SKILL.md" in call[0]]
+    assert len(decides) == 2
+    assert "decisions.md" in decides[1][0] and "remove each '[revisit]'" in decides[1][0]
+    assert PLAN_INPUTS[-1] == DECISIONS + "  Answer: sqlite\n"
+
+
+def test_gate_a_plain_answers_do_not_rerun_decide(tmp_path):
+    h = Harness(tmp_path, ask=lambda _: "sqlite")
+    h.pipeline().run()
+    assert sum("/decide/SKILL.md" in call[0] for call in h.agent.calls) == 1

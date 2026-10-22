@@ -1,6 +1,6 @@
 import re
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -34,7 +34,7 @@ ISSUE_INSTRUCTION = (
     "Proposed design and Acceptance criteria sections. Do not create the issue; the pipeline does."
 )
 ISSUE = Stage("issue", "forge-cli", (), "issue", "sonnet", 10, ISSUE_INSTRUCTION)
-ANALYZE = Stage("analyze", "analyze-issue", ("issue",), "analysis", "opus", 30)
+ANALYZE = Stage("analyze", "analyze", ("issue",), "analysis", "opus", 30)
 DECIDE = Stage("decide", "decide", ("issue", "analysis"), "decisions", "opus", 30)
 PLAN = Stage("plan", "plan", ("issue", "analysis", "decisions"), "plan", "opus", 30)
 
@@ -61,6 +61,12 @@ def bullets(items: list[str]) -> str:
 
 def retry_prompt(prompt: str, reply: str, problems: list[str]) -> str:
     return f"{prompt}\n\nYour previous reply failed these checks:\n{bullets(problems)}\nFix them and reply with the complete document.\n\nPrevious reply:\n{reply}"
+
+
+REVISIT_NOTE = (
+    "A human answered the escalated questions in the decisions file. Revise only the decisions their "
+    "answers change, keep every answer verbatim, and remove each '[revisit]' marker."
+)
 
 
 def phase_summary(phase: int) -> str:
@@ -114,7 +120,7 @@ class Pipeline:
                 return stage.name
         return None
 
-    def build_prompt(self, stage: Stage) -> str:
+    def build_prompt(self, stage: Stage, note: str = "") -> str:
         parts = [
             f"Follow the skill at {self.skills_dir / stage.skill / 'SKILL.md'}.",
             "Run non-interactively; do not ask questions.",
@@ -125,6 +131,8 @@ class Pipeline:
             parts.append("Input files:\n" + "\n".join(f"- {path}" for path in paths))
         if stage.instruction:
             parts.append(stage.instruction)
+        if note:
+            parts.append(note)
         target = "issue body" if stage.output == "issue" else f"{stage.output} comment"
         parts.append(f"Your final reply is posted as the {target}; make it the complete document.")
         return "\n".join(parts)
@@ -147,10 +155,10 @@ class Pipeline:
         yield from (phase_stage(n, title) for n, title in enumerate(phase_titles(self._artifact("plan")), 1))
         yield from closing_stages(phases)
 
-    def _execute(self, stage: Stage) -> Outcome:
-        if self.forge.has_artifact(stage.output):
+    def _execute(self, stage: Stage, note: str = "") -> Outcome:
+        if not note and self.forge.has_artifact(stage.output):
             return "skipped"
-        prompt = self.build_prompt(stage)
+        prompt = self.build_prompt(stage, note)
         result = self._run(stage, prompt)
         report = self._blocked_report(stage, result.text)
         if not report and (problems := self._problems(stage, result.text)):
@@ -201,6 +209,10 @@ class Pipeline:
             self.show(gate.preview(artifact))
             if self.ask and gate.answer and (updated := gate.answer(artifact, self.ask)) != artifact:
                 self.forge.post_artifact(gate.artifact, updated)
+                if gate.needs_rerun(updated):
+                    if self._execute(replace(stage, inputs=(*stage.inputs, gate.artifact)), REVISIT_NOTE) == "blocked":
+                        return False
+                    self.show(gate.preview(self._artifact(gate.artifact)))
             approved = self.confirm(gate.message)
             if approved and (open_items := gate.unresolved(self._artifact(gate.artifact))):
                 self.show(f"{len(open_items)} escalated question(s) still have no answer; answer them, then --resume.")
