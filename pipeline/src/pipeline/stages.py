@@ -176,6 +176,9 @@ class Pipeline:
             if self.ask and gate.answer and (updated := gate.answer(artifact, self.ask)) != artifact:
                 self.forge.post_artifact(gate.artifact, updated)
             approved = self.confirm(gate.message)
+            if approved and (open_items := gate.unresolved(self._artifact(gate.artifact))):
+                self.show(f"{len(open_items)} escalated question(s) still have no answer; answer them, then --resume.")
+                return False
             if approved and gate.publishes:
                 self.forge.finish(self._artifact(gate.artifact))
             return approved
