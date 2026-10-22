@@ -10,6 +10,8 @@ from pipeline.cost import DEFAULT_BUDGET_USD, BudgetExceeded, CostLedger, prior_
 from pipeline.evals import render_results, run_evals
 from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue
 from pipeline.gates import confirm
+from pipeline.node_bin import NodeNotFound, resolve_node_bin
+from pipeline.permissions import allowed_tools
 from pipeline.run_dir import RunDir, slugify
 from pipeline.stages import Pipeline
 
@@ -54,6 +56,7 @@ def post_cost(forge: Forge, ledger: CostLedger) -> None:
 
 def run_pipeline(args: argparse.Namespace) -> int:
     repo = Path(tempfile.mkdtemp(prefix="pipeline-dry-run-")) if args.dry_run else args.repo.resolve()
+    node_bin = None if args.dry_run else resolve_node_bin(repo)
     issue = fetch_issue(repo, args.issue) if args.issue else None
     slug = args.resume or (slugify(f"{issue.number} {issue.title}") if issue else slugify(args.idea))
     run_dir = RunDir(repo, slug)
@@ -72,7 +75,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     fake_agent = FakeAgent(dry_run_text)
     agent_for = (
         (lambda stage: fake_agent) if args.dry_run
-        else (lambda stage: ClaudeAgent(repo, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging)))
+        else (lambda stage: ClaudeAgent(repo, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging), node_bin, allowed_tools(repo, stage.read_only)))
     )
     budget = float(os.environ.get("BUDGET_USD", DEFAULT_BUDGET_USD))
     ledger = CostLedger(budget, prior_total(forge.read_artifact("cost")))
@@ -119,6 +122,6 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--dry-run cannot resume or use --issue")
     try:
         return run_pipeline(args)
-    except (AgentError, BudgetExceeded, ForgeError) as error:
+    except (AgentError, BudgetExceeded, ForgeError, NodeNotFound) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

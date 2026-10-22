@@ -107,3 +107,42 @@ def test_add_dirs_are_passed_for_reading_outside_the_repo(tmp_path, monkeypatch)
     command = seen["command"]
     start = command.index("--add-dir")
     assert command[start + 1 : start + 3] == ["/skills", "/inputs"]
+
+
+def test_allowed_tools_are_passed_comma_joined(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(command=command) or completed(payload()))
+    ClaudeAgent(tmp_path, 7, 30, allowed_tools=("Bash(a:*)", "Bash(b:*)")).run("hi", "opus", 1.0)
+    command = seen["command"]
+    assert command[command.index("--allowedTools") + 1] == "Bash(a:*),Bash(b:*)"
+
+
+def test_no_allowed_tools_flag_by_default(agent, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(command=command) or completed(payload()))
+    agent.run("hi", "opus", 1.0)
+    assert "--allowedTools" not in seen["command"]
+
+
+def test_permission_denials_are_reported_with_the_fix(agent, monkeypatch, capsys):
+    denials = [{"tool_name": "Bash", "tool_input": {"command": "make check"}}]
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: completed(payload(permission_denials=denials)))
+    agent.run("hi", "opus", 1.0)
+    err = capsys.readouterr().err
+    assert "make check" in err and ".pipeline.json" in err
+
+
+def test_node_bin_leads_path(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(k) or completed(payload()))
+    monkeypatch.setenv("PATH", "/usr/bin")
+    ClaudeAgent(tmp_path, 7, 30, node_bin=Path("/node22/bin")).run("hi", "opus", 1.0)
+    assert seen["env"]["PATH"] == "/node22/bin:/usr/bin"
+
+
+def test_path_is_untouched_without_node_bin(agent, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(k) or completed(payload()))
+    monkeypatch.setenv("PATH", "/usr/bin")
+    agent.run("hi", "opus", 1.0)
+    assert seen["env"]["PATH"] == "/usr/bin"
