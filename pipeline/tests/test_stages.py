@@ -39,6 +39,8 @@ def respond(prompt):
         return "Status: pass\nok"
     if "/review/SKILL.md" in prompt:
         return "Status: pass\nok"
+    if "/fix/SKILL.md" in prompt:
+        return "Status: done\nfixed"
     return "content"
 
 
@@ -280,13 +282,38 @@ def test_each_phase_gets_its_own_titled_checkpoint(tmp_path):
     assert commits == ["phase 1: schema", "phase 2: api", "phase 3: ui"]
 
 
-def test_failed_review_blocks_and_docs_never_runs(tmp_path):
+def skill_calls(h, skill):
+    return [call[0] for call in h.agent.calls if f"/{skill}/SKILL.md" in call[0]]
+
+
+def test_failed_review_runs_one_fix_round_then_continues(tmp_path):
+    h = Harness(tmp_path)
+    h.queued["review"] = ["Status: fail\n- Critical: SQL injection"]
+    assert h.pipeline().run() is None
+    assert "SQL injection" in staged(skill_calls(h, "fix")[0], "review.blocked")
+    assert len(skill_calls(h, "test")) == 2
+    assert "fixed" in staged(skill_calls(h, "review")[1], "fix-summary")
+    assert h.forge.has_artifact("review") and h.forge.has_artifact("pr")
+    assert ("checkpoint", "pipeline: fix review findings") in h.forge.calls
+
+
+def test_review_failing_after_fix_round_blocks_and_docs_never_runs(tmp_path):
     h = Harness(tmp_path)
     h.review_reply = "Status: fail\n- Critical: SQL injection"
     assert h.pipeline().run() == "review"
+    assert len(skill_calls(h, "fix")) == 1
     assert "SQL injection" in h.forge.artifacts["review.blocked"]
     assert not h.forge.has_artifact("review")
     assert "docs" not in h.called_stages()
+
+
+def test_blocked_fix_stops_before_retesting(tmp_path):
+    h = Harness(tmp_path)
+    h.queued["review"] = ["Status: fail\n- Critical: SQL injection"]
+    h.queued["fix"] = ["Status: blocked - test fails twice"]
+    assert h.pipeline().run() == "fix"
+    assert "test fails twice" in h.forge.artifacts["fix.blocked"]
+    assert len(skill_calls(h, "test")) == 1
 
 
 def test_review_is_read_only_and_docs_reads_it(tmp_path):

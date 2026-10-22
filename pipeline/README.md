@@ -3,7 +3,7 @@
 Takes a feature idea and produces a draft pull request. A fresh agent run handles each stage and passes work to the next through comments on the GitHub issue, so no stage depends on a long chat. You review at two points and merge yourself.
 
 ```
-idea -> issue -> analyze -> decide -> [Gate A] -> plan -> phase 1..N -> test -> review -> docs -> [Gate B]
+idea -> issue -> analyze -> decide -> [Gate A] -> plan -> phase 1..N -> test -> review [-> fix -> test -> review] -> docs -> [Gate B]
 ```
 
 ## Requirements
@@ -55,9 +55,10 @@ Before a stage runs, the pipeline copies its input comments into a temp folder o
 | implement-phase-N | `implement-phase` | sonnet | plan, earlier summaries | `phase-N-summary` |
 | test | `test` | sonnet | plan, summaries | `test-report` |
 | review | `review` | opus | issue, plan, summaries, test report | `review` |
+| fix | `fix` | sonnet | issue, plan, test report, failed review | `fix-summary` |
 | docs | `docs` | sonnet | plan, summaries, test report, review | `pr` |
 
-`review` cannot edit files. It labels findings Critical, Required or Nit and starts with `Status: pass`, or `Status: fail` if any finding is Critical or Required. A fail stops the run like a failed test, and `docs` does not run until `--resume` passes the review.
+`review` cannot edit files. It labels findings Critical, Required or Nit and starts with `Status: pass`, or `Status: fail` if any finding is Critical or Required. A fail runs one fix round: `fix` applies the Critical and Required findings, then `test` and `review` run again, with the review also reading `fix-summary`. If any of the three blocks or fails, the run stops and `docs` does not run until `--resume` passes the review. Each `--resume` that fails the review gets one more fix round.
 
 `decide` sorts each open question into one of three groups: decided from code, decided and recorded as low-risk, or escalated to you.
 
@@ -122,7 +123,7 @@ The pipeline passes each agent the full path to its skill file, so no install is
 To use the new skills in interactive Claude Code sessions, link the ones you do not already have:
 
 ```sh
-for skill in analyze decide plan implement-phase test review docs; do
+for skill in analyze decide plan implement-phase test review fix docs; do
   [ -e ~/.claude/skills/$skill ] || ln -s "$PWD/skills/$skill" ~/.claude/skills/$skill
 done
 ```

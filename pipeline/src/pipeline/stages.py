@@ -37,6 +37,12 @@ ISSUE = Stage("issue", "forge-cli", (), "issue", "sonnet", 10, ISSUE_INSTRUCTION
 ANALYZE = Stage("analyze", "analyze", ("issue",), "analysis", "opus", 30)
 DECIDE = Stage("decide", "decide", ("issue", "analysis"), "decisions", "opus", 30)
 PLAN = Stage("plan", "plan", ("issue", "analysis", "decisions"), "plan", "opus", 30)
+FIX = Stage(
+    "fix", "fix", ("issue", "plan", "test-report", "review.blocked"), "fix-summary", "sonnet", 60,
+    "Fix the Critical and Required findings in the failed review.", ("done", "blocked"), "pipeline: fix review findings",
+)
+FIX_NOTE = "This is the only automatic fix round; if findings remain, the run stops."
+RECHECK_NOTE = "The fix stage changed the code after the review failed. Check the code as it is now."
 
 
 def phase_count(plan: str) -> int:
@@ -110,8 +116,14 @@ class Pipeline:
 
     def run(self) -> str | None:
         """Runs stages in order; returns the stage it stopped at, or None when finished."""
+        stages: dict[str, Stage] = {}
         for stage in self._stages():
+            stages[stage.name] = stage
             outcome = self._execute(stage)
+            if outcome == "blocked" and stage.name == "review":
+                if stopped := self._fix_round(stages["test"], stage):
+                    return stopped
+                outcome = "done"
             if outcome == "done":
                 self.forge.checkpoint(stage.commit or f"pipeline: {stage.name}")
             if outcome == "blocked" or stage.name == self.stop_after:
@@ -176,6 +188,17 @@ class Pipeline:
         else:
             self.forge.post_artifact(stage.output, result.text)
         return "done"
+
+    def _fix_round(self, test: Stage, review: Stage) -> str | None:
+        """Runs fix, test and review once after a failed review; returns the stage it stopped at, or None if the review passes."""
+        self.show("review failed; running one fix round")
+        review = replace(review, inputs=(*review.inputs, FIX.output))
+        for stage, note in ((FIX, FIX_NOTE), (test, RECHECK_NOTE), (review, RECHECK_NOTE)):
+            if self._execute(stage, note) == "blocked":
+                return stage.name
+            if stage is not review:
+                self.forge.checkpoint(stage.commit or f"pipeline: {stage.name}")
+        return None
 
     def _run(self, stage: Stage, prompt: str) -> Result:
         self.ledger.check()
