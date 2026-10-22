@@ -9,7 +9,8 @@ from pipeline.run_dir import RunDir
 from pipeline.stages import ISSUE, Pipeline, phase_count, phase_stage
 
 PLAN = "# Plan\n## Phase 1: a\n## Phase 2: b\n"
-DECISIONS = "## Decided\n- x\n## Escalated\n1. Pick a data model?\n"
+ANALYSIS = "# Analysis\n\n## Open questions\n- **Q1:** Pick a data model?\n"
+DECISIONS = "## Decided from evidence\nNone.\n## Decided, low stakes\nNone.\n## Escalated\n1. **Q1:** Pick a data model?\n"
 PLAN_INPUTS: list[str] = []
 STAGE_ORDER = [
     "issue", "analyze", "decide", "plan",
@@ -28,6 +29,8 @@ def respond(prompt):
         return PLAN
     if "/decide/SKILL.md" in prompt:
         return DECISIONS
+    if "/analyze-issue/SKILL.md" in prompt:
+        return ANALYSIS
     if "/forge-cli/SKILL.md" in prompt:
         return "# Add dark mode\n\nbody"
     if "/implement-phase/SKILL.md" in prompt:
@@ -48,6 +51,7 @@ class Harness:
         self.phase_1_reply = None
         self.plan = None
         self.review_reply = None
+        self.queued: dict[str, list[str]] = {}
         self.agent = FakeAgent(self._respond, cost_usd=cost)
         self.forge = FakeForge()
         self.questions: list[str] = []
@@ -56,6 +60,9 @@ class Harness:
         self.options = {"ask": lambda _: "sqlite", **options}
 
     def _respond(self, prompt):
+        for skill, replies in self.queued.items():
+            if replies and f"/{skill}/SKILL.md" in prompt:
+                return replies.pop(0)
         if self.block_phase_2 and "Implement only phase 2" in prompt:
             return "Status: blocked - tests fail twice"
         if self.phase_1_reply and "Implement only phase 1" in prompt:
@@ -262,7 +269,7 @@ def test_gate_a_terminal_answers_are_posted_to_the_decisions_comment(tmp_path):
 
 def test_plan_input_without_replies_is_the_decisions_comment(tmp_path):
     Harness(tmp_path).pipeline().run()
-    assert PLAN_INPUTS == [DECISIONS.replace("1. Pick a data model?\n", "1. Pick a data model?\n  Answer: sqlite\n")]
+    assert PLAN_INPUTS == [DECISIONS + "  Answer: sqlite\n"]
 
 
 def test_each_phase_gets_its_own_titled_checkpoint(tmp_path):
@@ -367,3 +374,38 @@ def test_gate_a_continues_when_answers_are_added_on_github_before_approving(tmp_
 
     h = Harness(tmp_path, ask=lambda _: "", answers=approve)
     assert h.pipeline().run() is None
+
+
+def test_invalid_analysis_is_retried_once_with_the_problems(tmp_path):
+    h = Harness(tmp_path, stop_after="analyze")
+    h.queued["analyze-issue"] = ["# Analysis\nno questions section"]
+    assert h.pipeline().run() == "analyze"
+    retry = h.agent.calls[-1][0]
+    assert "missing a '## Open questions' section" in retry and "no questions section" in retry
+    assert h.forge.artifacts["analysis"] == ANALYSIS
+    assert len(h.agent.calls) == 3 and h.ledger.total() == 1.5
+
+
+def test_decisions_missing_a_question_block_after_one_retry(tmp_path):
+    h = Harness(tmp_path)
+    h.queued["decide"] = ["## Decided from evidence\nNone.\n## Decided, low stakes\nNone.\n## Escalated\nNone.\n"] * 2
+    assert h.pipeline().run() == "decide"
+    assert "no decision for Q1" in h.forge.artifacts["decide.blocked"]
+    assert not h.forge.has_artifact("decisions")
+    assert ("checkpoint", "pipeline: decide") not in h.forge.calls
+    assert [call[1] for call in h.agent.calls].count("opus") == 3
+
+
+def test_decisions_citing_a_missing_file_block(tmp_path):
+    h = Harness(tmp_path)
+    cited = DECISIONS.replace("None.\n## Decided, low", "- **Q2: x** - y. Evidence: `src/gone.py:4`.\n## Decided, low")
+    h.queued["decide"] = [cited, cited]
+    assert h.pipeline().run() == "decide"
+    assert "`src/gone.py` does not exist" in h.forge.artifacts["decide.blocked"]
+
+
+def test_a_blocked_analysis_reply_is_not_retried(tmp_path):
+    h = Harness(tmp_path)
+    h.queued["analyze-issue"] = ["Status: blocked - issue is unreadable"]
+    assert h.pipeline().run() == "analyze"
+    assert len(h.agent.calls) == 2

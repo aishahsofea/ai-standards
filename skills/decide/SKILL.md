@@ -37,7 +37,7 @@ Use exactly these headings so later stages can parse them:
   Answer: _pending_
 ```
 
-Write `None.` under a heading with no entries. Never drop `## Escalated`: Gate A reads it, and the human writes their answer on each `Answer:` line.
+Cover every `Q#` from the analysis. Cite evidence as `` `path/from/repo/root:line` ``; the pipeline rejects references to missing files or lines. Write `None.` under a heading with no entries. Never drop `## Escalated`: Gate A reads it, and the human writes their answer on each `Answer:` line.
 
 ## Excuses to reject
 

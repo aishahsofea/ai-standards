@@ -39,7 +39,7 @@ def respond(decide, plan):
 
 def test_run_case_scores_matching_buckets_and_good_plan(tmp_path):
     case = next(c for c in load_cases(CASES_DIR) if c.name == "public-api")
-    decide = "## Escalated\n- **Q1: x**\n## Decided, low stakes\n- **Q2: y**\n"
+    decide = "## Decided from evidence\nNone.\n## Escalated\n- **Q1: x**\n## Decided, low stakes\n- **Q2: y**\n"
     result = run_case(case, FakeAgent(respond(decide, GOOD_PLAN), cost_usd=0.5), SKILLS_DIR, RunDir(tmp_path, 'eval'))
     assert result.failures == [] and result.cost_usd == 1.0
 
@@ -50,3 +50,12 @@ def test_run_case_reports_under_escalation_and_bad_plan(tmp_path):
     result = run_case(case, FakeAgent(respond(decide, "nope")), SKILLS_DIR, RunDir(tmp_path, 'eval'))
     assert any("Q1" in failure and "low" in failure for failure in result.failures)
     assert any("Phase" in failure or "phase" in failure for failure in result.failures)
+
+
+def test_run_case_reports_structural_decision_problems(tmp_path):
+    case = next(c for c in load_cases(CASES_DIR) if c.name == "public-api")
+    decide = "## Decided, low stakes\n- **Q2: y**\n## Escalated\n- **Q1: x**\n  Answer: _pending_\n"
+    result = run_case(case, FakeAgent(respond(decide, GOOD_PLAN)), SKILLS_DIR, RunDir(tmp_path, "eval"))
+    assert result.failures == ["decisions: missing a '## Decided from evidence' section"]
+    result = run_case(case, FakeAgent(respond(decide.replace("Q2", "Q7"), GOOD_PLAN)), SKILLS_DIR, RunDir(tmp_path, "eval"))
+    assert "decisions: no decision for Q2" in result.failures
