@@ -123,7 +123,9 @@ The skills are plain Markdown, so any agent can follow one if you point it at th
 ## Limits
 
 - Checked against a live `claude` 2.1.289 run in a scratch repo: `--max-turns` and `--max-budget-usd` are accepted, and the JSON `result` and `total_cost_usd` fields parse. Not checked: what happens when a cap is hit, and a full pipeline run.
-- `ClaudeAgent` passes `--permission-mode acceptEdits`, so agents can edit files. Without it, `claude -p` refuses every edit. Shell commands are still refused unless the target repo's `.claude/settings.json` allows them, so add allow rules for the test command and any `git` or `gh` commands the skills use.
+- `ClaudeAgent` passes `--permission-mode acceptEdits`, so agents can edit files. Without it, `claude -p` refuses every edit. Shell commands are refused unless allowed, so the pipeline passes `--allowedTools` from `src/pipeline/permissions.py`: read-only `git`/`gh`/`ls`/`grep`/`cat` for every stage, plus common test, lint and build runners (pytest, npm, npx vitest/tsc/eslint/playwright, go, cargo) for the stages that write. It never allows `git commit` or `git push`; the pipeline does those. Agents run one command at a time from the repo root, so skills use `npm --prefix <dir> ...` rather than `cd <dir> && ...`.
+- A target repo adds its own commands in `.pipeline.json` at its root, for example `{"allowedTools": ["Bash(make check:*)"]}`. These apply to writing stages only. When claude is denied a command anyway, the pipeline prints the command and this fix to stderr.
+- The headless shell has no nvm. The pipeline reads the target repo's `.nvmrc` (root or one folder down), picks the newest matching `~/.nvm/versions/node/v<major>.*`, and puts its `bin` first on the agent's `PATH`; it stops if that version isn't installed. Set `PIPELINE_NODE_BIN` to override.
 - Not built: automatic continuation past the gates, a GitHub Actions trigger, and a Codex adapter.
 
 ## Test
