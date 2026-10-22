@@ -5,7 +5,7 @@ CONFIG_FILE = ".pipeline.json"
 
 READ_ONLY_TOOLS = (
     "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
-    "Bash(ls:*)", "Bash(grep:*)", "Bash(rg:*)", "Bash(cat:*)",
+    "Bash(ls:*)", "Bash(grep:*)", "Bash(rg:*)", "Bash(cat:*)", "Bash(wc:*)",
     "Bash(gh issue view:*)", "Bash(gh issue list:*)", "Bash(gh pr view:*)",
 )
 
