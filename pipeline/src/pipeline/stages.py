@@ -9,7 +9,7 @@ from pipeline.cost import CostLedger
 from pipeline.forge import Forge, ForgeError
 from pipeline.gates import GATES, PHASE_HEADING, plan_preview
 from pipeline.run_dir import RunDir
-from pipeline.validate import analysis_problems, decisions_problems, reference_problems
+from pipeline.validate import analysis_problems, decisions_problems, plan_problems, reference_problems
 
 STATUS = re.compile(r"\s*Status:\s*(\w+)", re.IGNORECASE)
 Outcome = Literal["skipped", "done", "blocked"]
@@ -37,6 +37,15 @@ ISSUE = Stage("issue", "forge-cli", (), "issue", "sonnet", 10, ISSUE_INSTRUCTION
 ANALYZE = Stage("analyze", "analyze", ("issue",), "analysis", "opus", 30)
 DECIDE = Stage("decide", "decide", ("issue", "analysis"), "decisions", "opus", 30)
 PLAN = Stage("plan", "plan", ("issue", "analysis", "decisions"), "plan", "opus", 30)
+FIX = Stage(
+    "fix", "fix", ("issue", "plan", "test-report", "review.blocked"), "fix-summary", "sonnet", 60,
+    "Fix the Critical and Required findings in the failed review.", ("done", "blocked"), "pipeline: fix review findings",
+)
+FIX_NOTE = "This is the only automatic fix round; if findings remain, the run stops."
+RECHECK_NOTE = "The fix stage changed the code after the review failed. Check the code as it is now."
+REREVIEW_NOTE = (
+    f"{RECHECK_NOTE} Recheck every finding in review.blocked; drop one only if the code now fixes it."
+)
 
 
 def phase_count(plan: str) -> int:
@@ -110,8 +119,14 @@ class Pipeline:
 
     def run(self) -> str | None:
         """Runs stages in order; returns the stage it stopped at, or None when finished."""
+        stages: dict[str, Stage] = {}
         for stage in self._stages():
-            outcome = self._execute(stage)
+            stages[stage.name] = stage
+            outcome = "blocked" if self._review_failed_earlier(stage) else self._execute(stage)
+            if outcome == "blocked" and stage.name == "review":
+                if stopped := self._fix_round(stages["test"], stage):
+                    return stopped
+                outcome = "done"
             if outcome == "done":
                 self.forge.checkpoint(stage.commit or f"pipeline: {stage.name}")
             if outcome == "blocked" or stage.name == self.stop_after:
@@ -177,6 +192,24 @@ class Pipeline:
             self.forge.post_artifact(stage.output, result.text)
         return "done"
 
+    def _fix_round(self, test: Stage, review: Stage) -> str | None:
+        """Runs fix, test and review once after a failed review; returns the stage it stopped at, or None if the review passes."""
+        self.show("review failed; running one fix round")
+        review = replace(review, inputs=(*review.inputs, "review.blocked", FIX.output))
+        for stage, note in ((FIX, FIX_NOTE), (test, RECHECK_NOTE), (review, REREVIEW_NOTE)):
+            if self._execute(stage, note) == "blocked":
+                return stage.name
+            if stage is not review:
+                self.forge.checkpoint(stage.commit or f"pipeline: {stage.name}")
+        return None
+
+    def _review_failed_earlier(self, stage: Stage) -> bool:
+        """A resumed run sends an earlier failed review to the fix round instead of reviewing afresh."""
+        if stage.name != "review" or self.forge.has_artifact(stage.output):
+            return False
+        report = self.forge.read_artifact("review.blocked")
+        return report is not None and (match := STATUS.match(report)) is not None and match[1].lower() == "fail"
+
     def _run(self, stage: Stage, prompt: str) -> Result:
         self.ledger.check()
         result = self.agent_for(stage).run(prompt, stage.model, self.ledger.budget_usd - self.ledger.total())
@@ -188,6 +221,8 @@ class Pipeline:
             return analysis_problems(text) + reference_problems(text, self.run_dir.repo)
         if stage.name == DECIDE.name:
             return decisions_problems(text, self._artifact("analysis")) + reference_problems(text, self.run_dir.repo)
+        if stage.name == PLAN.name:
+            return plan_problems(text)
         return []
 
     @staticmethod

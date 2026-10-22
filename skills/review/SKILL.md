@@ -20,6 +20,7 @@ Review the finished feature as an independent reviewer. Headless (the prompt say
 - Review the diff, not unrelated code.
 - Do not soften a finding because the tests pass.
 - Report honestly: say what you could not check.
+- A criterion listed under the test report's Manual checks is not a finding: carry it to your Manual checks list. Flag it as Required only if Playwright could have checked it and the repo has Playwright.
 
 ## Excuses to reject
 
@@ -37,3 +38,4 @@ The first line must be exactly `Status: pass` or `Status: fail`. Use `fail` if a
 
 - **Findings** — one line each: label, `file:line`, problem, fix. `None.` if clean.
 - **Axes** — one line per axis: what you checked.
+- **Manual checks** — the `- [ ]` checklist for the PR, from the test report plus any you add. `None.` if empty.

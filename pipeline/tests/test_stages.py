@@ -8,7 +8,8 @@ from pipeline.forge import FakeForge, ForgeError
 from pipeline.run_dir import RunDir
 from pipeline.stages import ISSUE, Pipeline, phase_count, phase_stage
 
-PLAN = "# Plan\n## Phase 1: a\n## Phase 2: b\n"
+CRITERIA = "## Acceptance criteria\n- it works: Phase 1, `test_a`\n"
+PLAN = f"# Plan\n## Phase 1: a\n- Verify: pytest\n## Phase 2: b\n- Verify: pytest\n{CRITERIA}"
 ANALYSIS = "# Analysis\n\n## Open questions\n- **Q1:** Pick a data model?\n"
 DECISIONS = "## Decided from evidence\nNone.\n## Decided, low stakes\nNone.\n## Escalated\n1. **Q1:** Pick a data model?\n"
 PLAN_INPUTS: list[str] = []
@@ -39,6 +40,8 @@ def respond(prompt):
         return "Status: pass\nok"
     if "/review/SKILL.md" in prompt:
         return "Status: pass\nok"
+    if "/fix/SKILL.md" in prompt:
+        return "Status: done\nfixed"
     return "content"
 
 
@@ -157,7 +160,7 @@ def test_pause_each_off_only_asks_at_gates(tmp_path):
 
 def test_plan_prompt_shows_preview_and_declining_stops(tmp_path):
     h = Harness(tmp_path, answers=lambda q: not q.startswith("plan done"))
-    h.plan = "## Assumptions\n- a1\n## Phase 1: schema\n## Out of scope\n- o1\n"
+    h.plan = f"## Assumptions\n- a1\n## Phase 1: schema\n- Verify: pytest\n{CRITERIA}## Out of scope\n- o1\n"
     assert h.pipeline().run() == "plan"
     preview = h.shown[-1]
     assert "1. schema" in preview and "a1" in preview and "o1" in preview
@@ -274,19 +277,77 @@ def test_plan_input_without_replies_is_the_decisions_comment(tmp_path):
 
 def test_each_phase_gets_its_own_titled_checkpoint(tmp_path):
     h = Harness(tmp_path)
-    h.plan = "# Plan\n## Phase 1: schema\n## Phase 2: api\n### Phase 3: ui\n"
+    h.plan = f"# Plan\n## Phase 1: schema\n- Verify: x\n## Phase 2: api\n- Verify: x\n### Phase 3: ui\n- Verify: x\n{CRITERIA}"
     h.pipeline().run()
     commits = [c[1] for c in h.forge.calls if c[0] == "checkpoint" and c[1].startswith("phase")]
     assert commits == ["phase 1: schema", "phase 2: api", "phase 3: ui"]
 
 
-def test_failed_review_blocks_and_docs_never_runs(tmp_path):
+def skill_calls(h, skill):
+    return [call[0] for call in h.agent.calls if f"/{skill}/SKILL.md" in call[0]]
+
+
+def test_failed_review_runs_one_fix_round_then_continues(tmp_path):
+    h = Harness(tmp_path)
+    h.queued["review"] = ["Status: fail\n- Critical: SQL injection"]
+    assert h.pipeline().run() is None
+    assert "SQL injection" in staged(skill_calls(h, "fix")[0], "review.blocked")
+    assert len(skill_calls(h, "test")) == 2
+    assert "fixed" in staged(skill_calls(h, "review")[1], "fix-summary")
+    assert h.forge.has_artifact("review") and h.forge.has_artifact("pr")
+    assert ("checkpoint", "pipeline: fix review findings") in h.forge.calls
+
+
+def test_review_failing_after_fix_round_blocks_and_docs_never_runs(tmp_path):
     h = Harness(tmp_path)
     h.review_reply = "Status: fail\n- Critical: SQL injection"
     assert h.pipeline().run() == "review"
+    assert len(skill_calls(h, "fix")) == 1
     assert "SQL injection" in h.forge.artifacts["review.blocked"]
     assert not h.forge.has_artifact("review")
     assert "docs" not in h.called_stages()
+
+
+def test_resume_after_a_failed_review_starts_with_the_fix_round(tmp_path):
+    h = Harness(tmp_path)
+    h.review_reply = "Status: fail\n- Critical: SQL injection"
+    h.pipeline().run()
+    h.review_reply = None
+    h.agent.calls.clear()
+    assert h.pipeline().run() is None
+    assert [Harness.skill(name) for name in h.called_stages()] == ["test", "review", "docs"]
+    assert "SQL injection" in staged(skill_calls(h, "fix")[0], "review.blocked")
+    review = skill_calls(h, "review")[0]
+    assert "SQL injection" in staged(review, "review.blocked") and "fixed" in staged(review, "fix-summary")
+    assert "Recheck every finding in review.blocked" in review
+
+
+def test_resume_after_a_malformed_review_reruns_the_review(tmp_path):
+    h = Harness(tmp_path)
+    h.review_reply = "looks fine"
+    assert h.pipeline().run() == "review"
+    h.review_reply = None
+    h.agent.calls.clear()
+    assert h.pipeline().run() is None
+    assert skill_calls(h, "fix") == []
+    assert len(skill_calls(h, "review")) == 1
+
+
+def test_plan_without_acceptance_criteria_is_retried_then_blocks(tmp_path):
+    h = Harness(tmp_path)
+    h.plan = "# Plan\n## Phase 1: a\n- Verify: pytest\n"
+    assert h.pipeline().run() == "plan"
+    assert "missing a '## Acceptance criteria' section" in h.forge.artifacts["plan.blocked"]
+    assert sum("/plan/SKILL.md" in call[0] for call in h.agent.calls) == 2
+
+
+def test_blocked_fix_stops_before_retesting(tmp_path):
+    h = Harness(tmp_path)
+    h.queued["review"] = ["Status: fail\n- Critical: SQL injection"]
+    h.queued["fix"] = ["Status: blocked - test fails twice"]
+    assert h.pipeline().run() == "fix"
+    assert "test fails twice" in h.forge.artifacts["fix.blocked"]
+    assert len(skill_calls(h, "test")) == 1
 
 
 def test_review_is_read_only_and_docs_reads_it(tmp_path):

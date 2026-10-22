@@ -22,6 +22,7 @@ The reader is a reviewer who did not watch the work and may not know the feature
 - **By phase** — for each plan phase: what changed and why it was done that way.
 - **Decisions** — decisions that shaped the design, including the human-answered ones.
 - **Verification** — test report result, any acceptance criteria not covered, and every open Required or Nit finding from the review.
+- **Manual checks** — the review's `- [ ]` checklist, copied as is, for a person to tick before merge.
 - **Docs updated** — files changed.
 
 State failures, open concerns, and deviations from the plan plainly.

@@ -1,5 +1,4 @@
 import json
-import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,8 +7,8 @@ from pipeline.agent import Agent
 from pipeline.cost import CostLedger
 from pipeline.forge import FakeForge
 from pipeline.run_dir import RunDir
-from pipeline.stages import DECIDE, PLAN, Pipeline, phase_count
-from pipeline.validate import QUESTION, decisions_problems
+from pipeline.stages import DECIDE, PLAN, Pipeline
+from pipeline.validate import QUESTION, decisions_problems, plan_problems
 
 CASES_DIR = Path(__file__).resolve().parents[2] / "evals" / "cases"
 CALL_BUDGET_USD = 2.0
@@ -53,15 +52,6 @@ def decide_buckets(decisions: str) -> dict[str, str]:
     return buckets
 
 
-def plan_failures(plan: str) -> list[str]:
-    try:
-        phase_count(plan)
-    except ValueError as error:
-        return [str(error)]
-    sections = re.split(r"^#{2,3} Phase \d+.*$", plan, flags=re.MULTILINE)[1:]
-    return [f"phase {n} has no Verify: line" for n, body in enumerate(sections, 1) if not re.search(r"^\W*Verify:", body, re.MULTILINE)]
-
-
 def run_case(case: Case, agent: Agent, skills_dir: Path, run_dir: RunDir) -> CaseResult:
     forge = FakeForge()
     forge.artifacts.update(issue=case.issue, analysis=case.analysis, decisions=case.decisions)
@@ -74,7 +64,7 @@ def run_case(case: Case, agent: Agent, skills_dir: Path, run_dir: RunDir) -> Cas
         for question, allowed in case.expected.items() if got.get(question) not in allowed
     ]
     failures += [f"decisions: {problem}" for problem in decisions_problems(decided.text, case.analysis)]
-    failures += plan_failures(planned.text)
+    failures += plan_problems(planned.text)
     return CaseResult(case.name, failures, decided.cost_usd + planned.cost_usd)
 
 
