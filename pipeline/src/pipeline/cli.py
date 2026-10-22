@@ -23,7 +23,9 @@ def dry_run_text(prompt: str) -> str:
     if "/plan/SKILL.md" in prompt:
         return "# Plan\n\n## Phase 1: dry run\n"
     if "/decide/SKILL.md" in prompt:
-        return "# Decisions\n\n## Escalated\nNone.\n"
+        return "# Decisions\n\n## Decided from evidence\nNone.\n\n## Decided, low stakes\nNone.\n\n## Escalated\nNone.\n"
+    if "/analyze-issue/SKILL.md" in prompt:
+        return "# Analysis\n\n## Open questions\nNone.\n"
     if "/implement-phase/SKILL.md" in prompt:
         return "Status: done\n# dry run\n"
     if "/test/SKILL.md" in prompt or "/review/SKILL.md" in prompt:

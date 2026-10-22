@@ -61,6 +61,14 @@ Before a stage runs, the pipeline copies its input comments into a temp folder o
 
 `decide` sorts each open question into one of three groups: decided from code, decided and recorded as low-risk, or escalated to you.
 
+After `analyze` and `decide` the pipeline checks the reply before posting it:
+
+- `analyze` needs an `## Open questions` section, numbered `Q1`, `Q2`, ... or `None.`.
+- `decide` needs `## Decided from evidence`, `## Decided, low stakes` and a readable `## Escalated`, with a decision for every `Q#` in the analysis.
+- Every backticked `path:line` reference in either reply must point to an existing file and a line inside it.
+
+A failing reply is sent back once with the list of problems. If it still fails, the run stops and the reply is posted as the `<stage>.blocked` comment; `--resume` runs the stage again. The retry is billed like any other call.
+
 A comment over GitHub's 65,536-character limit stops the run with an error naming the artifact.
 
 `test` and `review` also check the work against `DEFINITION_OF_DONE.md` in the target repo's root. Without that file they use the 8-line default in [`skills/DEFINITION_OF_DONE.md`](../skills/DEFINITION_OF_DONE.md). Unmet items appear in their reports.
@@ -100,6 +108,7 @@ pipeline eval [--case NAME]
 Runs the real `decide` and `plan` skills on the fixture cases in `evals/cases/` and prints a score. **It spends money** (each case makes two opus calls, capped at $2 each) and is not part of `pytest` or CI. Each case has an issue, an analysis, a decisions comment for the plan step, and `expected.json`, which lists the buckets allowed for each question. A case passes when:
 
 - every question lands in an allowed bucket (for example, a question about a public API must be escalated), and
+- the decisions pass the structure check above (headings present, every `Q#` answered), and
 - the plan has numbered phases and every phase has a `Verify:` line.
 
 Baseline (2026-10-17, before the anti-rationalization tables): 4/4 cases clean, about $1.64 for the four cases.

@@ -24,6 +24,7 @@ def check_artifact(name: str) -> None:
 
 class RunDir:
     def __init__(self, repo: Path, slug: str) -> None:
+        self.repo = repo
         self.slug = slug
         self.path = repo / ".agent" / "runs" / slug
         self.path.mkdir(parents=True, exist_ok=True)

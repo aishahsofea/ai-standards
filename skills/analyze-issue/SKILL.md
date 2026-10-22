@@ -14,9 +14,12 @@ implementation phase.
 - **Interactive** (default): follow every stage and gate below.
 - **Headless** (the prompt says to run non-interactively): do Stage 1 only, with no
   gates. Read the issue from the input file or link given in the prompt, never ask
-  questions, and make your final reply the findings document. Number each open
-  question `Q1`, `Q2`, ... so a later stage can answer them. Do not write a plan,
-  write files, or change code.
+  questions, and make your final reply the findings document. Use a `##` heading
+  for each section of step 3. Under `## Open questions` number each question
+  `- **Q1:** ...`, `- **Q2:** ...` (or write `None.`) so a later stage can answer
+  them. Cite code as `` `path/from/repo/root:line` ``; the pipeline rejects
+  references to missing files or lines. Do not write a plan, write files, or
+  change code.
 
 ## Stage 1 — Analyze & report findings
 

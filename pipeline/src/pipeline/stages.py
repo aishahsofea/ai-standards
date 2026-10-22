@@ -4,11 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pipeline.agent import Agent
+from pipeline.agent import Agent, Result
 from pipeline.cost import CostLedger
 from pipeline.forge import Forge, ForgeError
 from pipeline.gates import GATES, PHASE_HEADING, plan_preview
 from pipeline.run_dir import RunDir
+from pipeline.validate import analysis_problems, decisions_problems, reference_problems
 
 STATUS = re.compile(r"\s*Status:\s*(\w+)", re.IGNORECASE)
 Outcome = Literal["skipped", "done", "blocked"]
@@ -52,6 +53,14 @@ def phase_titles(plan: str) -> list[str]:
 def issue_title(issue: str) -> str:
     first_line = next(line for line in issue.splitlines() if line.strip())
     return first_line.lstrip("# ").strip()
+
+
+def bullets(items: list[str]) -> str:
+    return "\n".join(f"- {item}" for item in items)
+
+
+def retry_prompt(prompt: str, reply: str, problems: list[str]) -> str:
+    return f"{prompt}\n\nYour previous reply failed these checks:\n{bullets(problems)}\nFix them and reply with the complete document.\n\nPrevious reply:\n{reply}"
 
 
 def phase_summary(phase: int) -> str:
@@ -141,11 +150,15 @@ class Pipeline:
     def _execute(self, stage: Stage) -> Outcome:
         if self.forge.has_artifact(stage.output):
             return "skipped"
-        self.ledger.check()
-        budget = self.ledger.budget_usd - self.ledger.total()
-        result = self.agent_for(stage).run(self.build_prompt(stage), stage.model, budget)
-        self.ledger.record(stage.name, stage.model, result.cost_usd)
-        if report := self._blocked_report(stage, result.text):
+        prompt = self.build_prompt(stage)
+        result = self._run(stage, prompt)
+        report = self._blocked_report(stage, result.text)
+        if not report and (problems := self._problems(stage, result.text)):
+            result = self._run(stage, retry_prompt(prompt, result.text, problems))
+            report = self._blocked_report(stage, result.text)
+            if not report and (problems := self._problems(stage, result.text)):
+                report = f"Status: blocked - the reply failed these checks:\n{bullets(problems)}\n\n{result.text}"
+        if report:
             blocked = f"{stage.name}.blocked"
             self.show(f"{stage.name} stopped; report posted as the '{blocked}' comment on the issue:\n{report}")
             self.forge.post_artifact(blocked, report)
@@ -155,6 +168,19 @@ class Pipeline:
         else:
             self.forge.post_artifact(stage.output, result.text)
         return "done"
+
+    def _run(self, stage: Stage, prompt: str) -> Result:
+        self.ledger.check()
+        result = self.agent_for(stage).run(prompt, stage.model, self.ledger.budget_usd - self.ledger.total())
+        self.ledger.record(stage.name, stage.model, result.cost_usd)
+        return result
+
+    def _problems(self, stage: Stage, text: str) -> list[str]:
+        if stage.name == ANALYZE.name:
+            return analysis_problems(text) + reference_problems(text, self.run_dir.repo)
+        if stage.name == DECIDE.name:
+            return decisions_problems(text, self._artifact("analysis")) + reference_problems(text, self.run_dir.repo)
+        return []
 
     @staticmethod
     def _blocked_report(stage: Stage, text: str) -> str | None:

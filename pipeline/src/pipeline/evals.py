@@ -9,11 +9,11 @@ from pipeline.cost import CostLedger
 from pipeline.forge import FakeForge
 from pipeline.run_dir import RunDir
 from pipeline.stages import DECIDE, PLAN, Pipeline, phase_count
+from pipeline.validate import QUESTION, decisions_problems
 
 CASES_DIR = Path(__file__).resolve().parents[2] / "evals" / "cases"
 CALL_BUDGET_USD = 2.0
 BUCKET_HEADINGS = {"Decided from evidence": "evidence", "Decided, low stakes": "low", "Escalated": "escalated"}
-QUESTION = re.compile(r"\*\*(Q\d+)\b")
 
 
 @dataclass(frozen=True)
@@ -73,6 +73,7 @@ def run_case(case: Case, agent: Agent, skills_dir: Path, run_dir: RunDir) -> Cas
         f"{question}: expected {'/'.join(allowed)}, got {got.get(question, 'missing')}"
         for question, allowed in case.expected.items() if got.get(question) not in allowed
     ]
+    failures += [f"decisions: {problem}" for problem in decisions_problems(decided.text, case.analysis)]
     failures += plan_failures(planned.text)
     return CaseResult(case.name, failures, decided.cost_usd + planned.cost_usd)
 
