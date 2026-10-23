@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.agent import AgentError, FakeAgent
+from pipeline.agent import AgentError, Denial, FakeAgent
 from pipeline.claude_agent import ClaudeAgent
 
 
@@ -130,6 +130,7 @@ def test_permission_denials_are_reported_with_the_fix(agent, monkeypatch, capsys
     agent.run("hi", "opus", 1.0)
     err = capsys.readouterr().err
     assert "make check" in err and ".pipeline.json" in err
+    assert agent.run("hi", "opus", 1.0).denials == (Denial("Bash", "make check"),)
 
 
 def test_node_bin_leads_path(tmp_path, monkeypatch):
