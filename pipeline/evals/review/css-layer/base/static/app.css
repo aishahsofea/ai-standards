@@ -1,0 +1,24 @@
+@layer base, components, utilities;
+
+:root {
+  --accent-soft: #dbe7ff;
+  --accent-line: #1d4ed8;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+@layer base {
+  body {
+    margin: 0;
+    font-family: system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .bubble-user {
+    background: var(--accent-soft);
+    padding: 8px 12px;
+  }
+}

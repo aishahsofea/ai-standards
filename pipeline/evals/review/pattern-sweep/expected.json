@@ -1,0 +1,5 @@
+{"status": "fail", "findings": [
+  {"file": "web/render.py", "lines": [9, 9]},
+  {"file": "web/render.py", "lines": [13, 13]},
+  {"file": "web/notify.py", "lines": [2, 2]}
+]}

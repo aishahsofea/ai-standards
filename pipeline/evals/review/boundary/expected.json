@@ -1,0 +1,1 @@
+{"status": "fail", "findings": [{"file": "shop/shipping.py", "lines": [5, 7]}]}

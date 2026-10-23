@@ -73,7 +73,7 @@ A failing reply is sent back once with the list of problems. If it still fails, 
 
 A comment over GitHub's 65,536-character limit stops the run with an error naming the artifact.
 
-`test` fails when an acceptance criterion has no covering test. In a repo with Playwright, a criterion a browser can check must have a passing Playwright spec; `implement-phase` writes and runs those specs too. `test` and `review` also check the work against `DEFINITION_OF_DONE.md` in the target repo's root. Without that file they use the 8-line default in [`skills/DEFINITION_OF_DONE.md`](../skills/DEFINITION_OF_DONE.md). Unmet items appear in their reports.
+`test` fails when an acceptance criterion has no covering test, or when its test still passes after `test` breaks the behavior on purpose. In a repo with Playwright, a criterion a browser can check must have a passing Playwright spec; `implement-phase` writes and runs those specs too. `test` and `review` also check the work against `DEFINITION_OF_DONE.md` in the target repo's root. Without that file they use the 8-line default in [`skills/DEFINITION_OF_DONE.md`](../skills/DEFINITION_OF_DONE.md). Unmet items appear in their reports.
 
 ## Gates
 
@@ -116,6 +116,30 @@ Runs the real `decide` and `plan` skills on the fixture cases in `evals/cases/` 
 Baseline (2026-10-17, before the anti-rationalization tables): 4/4 cases clean, about $1.64 for the four cases.
 
 After the anti-rationalization tables (2026-10-17): 4/4 cases clean, $1.67. No change; the fixtures were already passing, so they cannot show gains.
+
+```sh
+pipeline eval --suite review [--case NAME]
+```
+
+Runs the real `review` skill (one opus call per case, capped at $2) on the cases in `evals/review/`. Each case is a small repo: `base/` is committed on `main` and `head/` on a `feature` branch. The case also holds the issue, plan, phase summary and a passing test report. The fixture tests pass, so the planted bug is visible only on review. `expected.json` gives the expected status and the `file` and `lines` of each planted bug. A case passes when:
+
+- the status matches, and
+- every planted bug is cited by a Critical or Required finding (a `file:line` inside its lines), and
+- the `clean` case has no Critical or Required finding.
+
+| Case | Planted bug |
+|---|---|
+| `sql-injection` | Email put into an SQL string |
+| `boundary` | `>` where the issue says "$100 or more"; the tests skip 100 |
+| `pattern-sweep` | Unescaped user text in three places across two files |
+| `duplicate-helper` | Re-implements the existing `slugify` |
+| `clean` | None |
+| `css-layer` | A selection rule in `@layer utilities` that the unlayered global `::selection` overrides, so it never applies (#256) |
+| `class-only-test` | A loading state that only adds a class; the button can still be clicked, and the test checks only the class |
+| `untouched-instance` | The issue says escape usernames everywhere; the diff fixes one function and leaves the same bug in an unchanged one (#260) |
+| `noisy-diff` | 0-based page offset in a 1-based `paginate`, inside a 100-line diff of helpers, export and docs |
+
+Baseline (2026-10-22, one run per case): the current skill scores 9/9, $2.56. The skill before the axis checklists and pattern rule (`bc575f8^`) scores 8/9, $2.36. Its one fail, `class-only-test`, found the bug but put a sentence before `Status:`, which stops a real run. No case yet separates the two skills on what they find.
 
 ## Skills
 

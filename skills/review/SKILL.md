@@ -10,14 +10,20 @@ Review the finished feature as an independent reviewer. Headless (the prompt say
 ## Steps
 
 1. Read the issue, plan, phase summaries, and test report from the input files.
-2. Diff the branch against the base branch (`git diff <base>...HEAD`) and read the changed code in full.
-3. Check each axis: correctness (matches the issue and plan, edge cases, errors), readability, architecture (fits the codebase, no needless abstraction), security, performance.
+2. Diff the branch against the base branch (`git diff <base>...HEAD`). Read the changed tests first: do they check behavior, and would they fail if the code broke? Then read the changed code in full.
+3. Check each axis:
+   - **Correctness**: matches the issue and plan; edge cases, error paths, state and race bugs.
+   - **Readability**: names and structure match the surrounding code; no clever tricks or dead code.
+   - **Architecture**: follows existing patterns; reuses the existing helper instead of a near-duplicate; keeps feature logic out of shared modules; reduces complexity rather than moving it.
+   - **Security**: input and external data validated at boundaries; authorization checked; no injection or XSS; no secrets. New or upgraded dependencies: needed, maintained, lockfile diff matches.
+   - **Performance**: no N+1 queries, unbounded loops or fetches, or needless re-renders.
 4. Check the diff against the definition of done: `DEFINITION_OF_DONE.md` in the repo root if it exists, else [the built-in default](../DEFINITION_OF_DONE.md). Each unmet item is a Required finding.
 5. Label every finding `Critical` (breaks behavior or is unsafe), `Required` (must change before merge), or `Nit` (optional). Give `file:line` and the fix for each.
 
 ## Rules
 
 - Review the diff, not unrelated code.
+- When a finding comes from a pattern (a cascade rule, a missing guard), search the diff and the files it touches for other instances and list each one.
 - Do not soften a finding because the tests pass.
 - Report honestly: say what you could not check.
 - A criterion listed under the test report's Manual checks is not a finding: carry it to your Manual checks list. Flag it as Required only if Playwright could have checked it and the repo has Playwright.
@@ -36,6 +42,6 @@ Review the finished feature as an independent reviewer. Headless (the prompt say
 
 The first line must be exactly `Status: pass` or `Status: fail`. Use `fail` if any finding is Critical or Required. Any other first line stops the run as blocked. Then:
 
-- **Findings** — one line each: label, `file:line`, problem, fix. `None.` if clean.
+- **Findings** — Critical first, then Required, then Nit; one line each: label, `file:line`, problem, fix. `None.` if clean.
 - **Axes** — one line per axis: what you checked.
 - **Manual checks** — the `- [ ]` checklist for the PR, from the test report plus any you add. `None.` if empty.
