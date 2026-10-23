@@ -4,14 +4,14 @@ import sys
 import tempfile
 from pathlib import Path
 
-from pipeline.agent import AgentError, FakeAgent
+from pipeline.agent import AgentError, Denial, FakeAgent
 from pipeline.claude_agent import ClaudeAgent
 from pipeline.cost import DEFAULT_BUDGET_USD, BudgetExceeded, CostLedger, prior_total, render_table
 from pipeline.evals import render_results, run_evals, run_review_evals
 from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue
 from pipeline.gates import GateError, confirm
 from pipeline.node_bin import NodeNotFound, resolve_node_bin
-from pipeline.permissions import allowed_tools
+from pipeline.permissions import allowed_tools, ask_approvals
 from pipeline.run_dir import RunDir, slugify
 from pipeline.stages import Pipeline
 
@@ -76,9 +76,17 @@ def run_pipeline(args: argparse.Namespace) -> int:
     state.save(state_path)
 
     fake_agent = FakeAgent(dry_run_text)
+    approved: list[str] = []
+    declined: set[str] = set()
+
+    def approve_denials(denials: tuple[Denial, ...]) -> bool:
+        allowed = ask_approvals(denials, input, repo, declined)
+        approved.extend(allowed)
+        return bool(allowed)
+
     agent_for = (
         (lambda stage: fake_agent) if args.dry_run
-        else (lambda stage: ClaudeAgent(repo, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging), node_bin, allowed_tools(repo, stage.read_only)))
+        else (lambda stage: ClaudeAgent(repo, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging), node_bin, (*allowed_tools(repo, stage.read_only), *approved)))
     )
     budget = float(os.environ.get("BUDGET_USD", DEFAULT_BUDGET_USD))
     ledger = CostLedger(budget, prior_total(forge.read_artifact("cost")))
@@ -86,6 +94,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         run_dir, ledger, agent_for, SKILLS_DIR, state.idea,
         (lambda _: True) if args.dry_run else confirm, print, forge, stop_after=args.stop_after,
         ask=None if args.dry_run else input,
+        approve=None if args.dry_run else approve_denials,
     )
     try:
         stopped = pipeline.run()

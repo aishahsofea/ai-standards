@@ -1,5 +1,8 @@
 import json
+from collections.abc import Callable
 from pathlib import Path
+
+from pipeline.agent import Denial
 
 CONFIG_FILE = ".pipeline.json"
 
@@ -33,3 +36,27 @@ def repo_tools(repo: Path) -> tuple[str, ...]:
 
 def allowed_tools(repo: Path, read_only: bool) -> tuple[str, ...]:
     return with_rtk(READ_ONLY_TOOLS if read_only else READ_ONLY_TOOLS + RUNNER_TOOLS + repo_tools(repo))
+
+
+def save_repo_rule(repo: Path, rule: str) -> None:
+    config = repo / CONFIG_FILE
+    data = json.loads(config.read_text()) if config.exists() else {}
+    if rule not in data.get("allowedTools", ()):
+        data["allowedTools"] = [*data.get("allowedTools", ()), rule]
+        config.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def ask_approvals(
+    denials: tuple[Denial, ...], ask: Callable[[str], str], repo: Path, declined: set[str]
+) -> list[str]:
+    """Asks about each distinct denied rule; returns the ones allowed, saving 'a' answers to .pipeline.json."""
+    approved: list[str] = []
+    for denial in {d.rule: d for d in denials if d.rule not in declined}.values():
+        reply = ask(f"Agent was denied `{denial.command or denial.tool}`. Allow {denial.rule}? (y this run, a always, Enter skip): ").strip().lower()
+        if reply in ("y", "a"):
+            approved.append(denial.rule)
+            if reply == "a":
+                save_repo_rule(repo, denial.rule)
+        else:
+            declined.add(denial.rule)
+    return approved

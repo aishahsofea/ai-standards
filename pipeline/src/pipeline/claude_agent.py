@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from pipeline.agent import AgentError, Result
+from pipeline.agent import AgentError, Denial, Result
 
 
 class ClaudeAgent:
@@ -55,7 +55,10 @@ class ClaudeAgent:
             raise AgentError(f"unparseable claude output: {stdout[:200]!r}") from error
         if payload.get("is_error"):
             raise AgentError(f"claude reported an error: {text}")
-        for denial in payload.get("permission_denials", ()):
-            attempted = denial.get("tool_input", {}).get("command", "")
-            print(f"claude was denied {denial.get('tool_name')} {attempted!r}; add a rule for it to allowedTools in .pipeline.json", file=sys.stderr)
-        return Result(text, cost)
+        denials = tuple(
+            Denial(denial.get("tool_name", ""), denial.get("tool_input", {}).get("command", ""))
+            for denial in payload.get("permission_denials", ())
+        )
+        for denial in denials:
+            print(f"claude was denied {denial.tool} {denial.command!r}; add a rule for it to allowedTools in .pipeline.json", file=sys.stderr)
+        return Result(text, cost, denials)

@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from pipeline.agent import Agent, Result
+from pipeline.agent import Agent, Denial, Result
 from pipeline.cost import CostLedger
 from pipeline.forge import Forge, ForgeError
 from pipeline.gates import GATES, PHASE_HEADING, plan_preview
@@ -116,6 +116,7 @@ class Pipeline:
     stop_after: str | None = None
     pause_each: bool = True
     ask: Callable[[str], str] | None = None
+    approve: Callable[[tuple[Denial, ...]], bool] | None = None
 
     def run(self) -> str | None:
         """Runs stages in order; returns the stage it stopped at, or None when finished."""
@@ -181,6 +182,8 @@ class Pipeline:
             report = self._blocked_report(stage, result.text)
             if not report and (problems := self._problems(stage, result.text)):
                 report = f"Status: blocked - the reply failed these checks:\n{bullets(problems)}\n\n{result.text}"
+        if report and self.approve and result.denials and self.approve(result.denials):
+            return self._execute(stage, note)
         if report:
             blocked = f"{stage.name}.blocked"
             self.show(f"{stage.name} stopped; report posted as the '{blocked}' comment on the issue:\n{report}")

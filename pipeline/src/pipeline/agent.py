@@ -8,9 +8,24 @@ class AgentError(Exception):
 
 
 @dataclass(frozen=True)
+class Denial:
+    tool: str
+    command: str = ""
+
+    @property
+    def rule(self) -> str:
+        if self.tool != "Bash":
+            return self.tool
+        words = self.command.split()
+        prefix = words[:2] if len(words) > 1 and not words[1].startswith("-") else words[:1]
+        return f"Bash({' '.join(prefix)}:*)"
+
+
+@dataclass(frozen=True)
 class Result:
     text: str
     cost_usd: float
+    denials: tuple[Denial, ...] = ()
 
 
 class Agent(Protocol):

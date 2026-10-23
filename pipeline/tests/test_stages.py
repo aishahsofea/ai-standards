@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.agent import FakeAgent
+from pipeline.agent import Denial, FakeAgent, Result
 from pipeline.cost import BudgetExceeded, CostLedger
 from pipeline.forge import FakeForge, ForgeError
 from pipeline.run_dir import RunDir
@@ -381,6 +381,46 @@ def test_blocked_stage_posts_report_without_checkpoint_and_reruns_on_resume(tmp_
     h.block_phase_2 = False
     assert h.pipeline().run() is None
     assert ("checkpoint", "phase 2: b") in h.forge.calls
+
+
+class DenyingAgent(FakeAgent):
+    def __init__(self, respond):
+        super().__init__(respond)
+        self.denied_once = False
+
+    def run(self, prompt, model, budget):
+        result = super().run(prompt, model, budget)
+        if "Implement only phase 2" in prompt and not self.denied_once:
+            self.denied_once = True
+            return Result(result.text, 0.0, (Denial("Bash", "docker ps"),))
+        return result
+
+
+def test_approved_denial_reruns_the_blocked_stage_without_posting_blocked(tmp_path):
+    h = Harness(tmp_path)
+    h.block_phase_2 = True
+    h.agent = DenyingAgent(h._respond)
+    seen = []
+
+    def approve(denials):
+        seen.append(denials)
+        h.block_phase_2 = False
+        return True
+
+    h.options["approve"] = approve
+    assert h.pipeline().run() is None
+    assert seen == [(Denial("Bash", "docker ps"),)]
+    assert not h.forge.has_artifact("implement-phase-2.blocked")
+    assert h.forge.has_artifact("phase-2-summary")
+
+
+def test_declined_denial_still_blocks(tmp_path):
+    h = Harness(tmp_path)
+    h.block_phase_2 = True
+    h.agent = DenyingAgent(h._respond)
+    h.options["approve"] = lambda denials: False
+    assert h.pipeline().run() == "implement-phase-2"
+    assert h.forge.has_artifact("implement-phase-2.blocked")
 
 
 @pytest.mark.parametrize("reply", ["no status here", "Status: maybe", "Status: pass"])
