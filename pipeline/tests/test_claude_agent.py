@@ -83,7 +83,18 @@ def test_fake_agent_records_calls():
     assert fake.calls == [("abc", "haiku", 1.0)]
 
 
-def test_accepts_file_edits_without_prompting(agent, monkeypatch):
+def test_runs_in_auto_mode_and_never_commits_or_pushes(agent, monkeypatch):
+    monkeypatch.delenv("PIPELINE_PERMISSION_MODE", raising=False)
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(command=command) or completed(payload()))
+    agent.run("hi", "sonnet", 1.0)
+    command = seen["command"]
+    assert command[command.index("--permission-mode") + 1] == "auto"
+    assert command[command.index("--disallowedTools") + 1] == "Bash(git commit:*),Bash(git push:*)"
+
+
+def test_permission_mode_can_fall_back_to_accept_edits(agent, monkeypatch):
+    monkeypatch.setenv("PIPELINE_PERMISSION_MODE", "acceptEdits")
     seen = {}
     monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(command=command) or completed(payload()))
     agent.run("hi", "sonnet", 1.0)
@@ -91,13 +102,12 @@ def test_accepts_file_edits_without_prompting(agent, monkeypatch):
     assert command[command.index("--permission-mode") + 1] == "acceptEdits"
 
 
-def test_read_only_denies_edit_tools_and_skips_accept_edits(tmp_path, monkeypatch):
+def test_read_only_also_denies_edit_tools(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(command=command) or completed(payload()))
     ClaudeAgent(tmp_path, 7, 30, read_only=True).run("hi", "opus", 1.0)
     command = seen["command"]
-    assert "acceptEdits" not in command
-    assert command[command.index("--disallowedTools") + 1] == "Edit,Write,NotebookEdit"
+    assert command[command.index("--disallowedTools") + 1] == "Edit,Write,NotebookEdit,Bash(git commit:*),Bash(git push:*)"
 
 
 def test_add_dirs_are_passed_for_reading_outside_the_repo(tmp_path, monkeypatch):
