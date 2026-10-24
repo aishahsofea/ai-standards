@@ -12,8 +12,9 @@ Fix what the review found and nothing else. Headless (the prompt says to run non
 1. Read the issue, plan, test report, and failed review. Read the code each finding names.
 2. For each Critical and Required finding, follow the [tdd](../tdd/SKILL.md) skill: write a test that fails because of the finding, then make the smallest change that passes it. Apply a Nit only if it is a one-line change in a file you are already fixing.
 3. A finding that needs a browser or a person (an unrun manual check) is not code to change: list it under Manual checks.
-4. Run the tests for every area you changed, each from the repo root as a single command: use `npm --prefix <dir> ...`, never `cd <dir> && ...` or `source`/`nvm`.
-5. If a finding's fix fails verification twice, stop and report it. Do not keep retrying.
+4. The failed review may end with "Replies on the issue" from the owner. A finding or manual check a reply accepts or confirms is settled: list it under Not fixed citing the reply, tick its check, and do not report `blocked` for it.
+5. Run the tests for every area you changed, each from the repo root as a single command: use `npm --prefix <dir> ...`, never `cd <dir> && ...` or `source`/`nvm`.
+6. If a finding's fix fails verification twice, stop and report it. Do not keep retrying.
 
 ## Rules
 
