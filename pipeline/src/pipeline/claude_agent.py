@@ -7,6 +7,10 @@ from pathlib import Path
 from pipeline.agent import AgentError, Denial, Result
 
 
+EDIT_TOOLS = ("Edit", "Write", "NotebookEdit")
+GIT_WRITES = ("Bash(git commit:*)", "Bash(git push:*)")
+
+
 class ClaudeAgent:
     def __init__(self, cwd: Path, max_turns: int, timeout_s: float, read_only: bool = False, add_dirs: tuple[Path, ...] = (), node_bin: Path | None = None, allowed_tools: tuple[str, ...] = ()) -> None:
         self.cwd = cwd
@@ -29,7 +33,8 @@ class ClaudeAgent:
             command += ["--add-dir", *map(str, self.add_dirs)]
         if self.allowed_tools:
             command += ["--allowedTools", ",".join(self.allowed_tools)]
-        command += ["--disallowedTools", "Edit,Write,NotebookEdit"] if self.read_only else ["--permission-mode", "acceptEdits"]
+        denied = (*EDIT_TOOLS, *GIT_WRITES) if self.read_only else GIT_WRITES
+        command += ["--permission-mode", os.environ.get("PIPELINE_PERMISSION_MODE", "auto"), "--disallowedTools", ",".join(denied)]
         try:
             proc = subprocess.run(
                 command, cwd=self.cwd, capture_output=True, text=True, timeout=self.timeout_s, env=self._env()
