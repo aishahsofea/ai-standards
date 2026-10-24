@@ -92,6 +92,8 @@ A comment over GitHub's 65,536-character limit stops the run with an error namin
 
 `--resume <slug>` skips every stage whose comment already exists. Re-running a stage edits its comment instead of adding a second one. Both gates are asked again.
 
+After a failed review, reply on the issue to accept a finding or confirm a manual check. On resume, the fix stage and the re-review read every reply posted after the `review.blocked` comment, and neither blocks on a finding you accepted.
+
 ## Cost controls
 
 - `BUDGET_USD` sets the spend limit per issue. Default: 15 (US dollars).
