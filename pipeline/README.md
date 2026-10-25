@@ -56,6 +56,7 @@ Before a stage runs, the pipeline copies its input comments into a temp folder o
 | test | `test` | sonnet | plan, summaries | `test-report` |
 | review | `review` | opus | issue, plan, summaries, test report | `review` |
 | fix | `fix` | sonnet | issue, plan, test report, failed review | `fix-summary` |
+| revise | `revise` | sonnet | issue, plan, test report, review, pr, earlier revisions | `revision-N` |
 | docs | `docs` | sonnet | plan, summaries, test report, review | `pr` |
 
 `review` cannot edit files. It labels findings Critical, Required or Nit and starts with `Status: pass`, or `Status: fail` if any finding is Critical or Required. A fail runs one fix round: `fix` applies the Critical and Required findings, then `test` and `review` run again, with the review also reading `fix-summary`. If any of the three blocks or fails, the run stops and `docs` does not run until `--resume` passes the review. A `--resume` after a failed review starts with another fix round, not a fresh review, and the review after it reads the failed `review.blocked` so its findings carry over.
@@ -78,7 +79,17 @@ A comment over GitHub's 65,536-character limit stops the run with an error namin
 ## Gates
 
 - **Gate A**, after `decide`: the run prints the decided items, then the open part of the `## Escalated` section of the `decisions` comment. It stops, even if you approve, while any escalated question is unanswered, and errors if `## Escalated` is missing or unreadable. The run asks for each open question in the terminal: type an answer, `r` to accept the recommendation, `m` for a multi-line answer (end with a blank line), or Enter to skip. Start with `!` when the answer changes an earlier decision: `decide` then reruns once with the answers and revises the affected items. Answers are written back to the comment. You can also edit the comment on GitHub, or reply in a new comment. After you approve, the plan stage reads the edited comment and any later replies.
-- **Gate B**, after `docs`: the run prints the `pr` comment. Approving puts its current text in the PR description and marks the PR ready. Merging is still manual.
+- **Gate B**, after `docs`: the run prints the `pr` comment. Approving puts its current text in the PR description and marks the PR ready. Merging is still manual. Answering `N` offers a feedback prompt (Enter to stop, `m` for multi-line); feedback runs [revise](#revise).
+
+## Revise
+
+```sh
+pipeline revise <slug> "Confirm delete in a modal, not inline"
+```
+
+For changes you want after the run, such as UI or UX you dislike. Run it from the target repo any time before you merge. It also runs when you decline Gate B and type feedback.
+
+`revise` takes your feedback as the spec: it writes a failing test, changes the code, and posts a `revision-N` comment (feedback, changes, new acceptance criteria). Then `test`, `review` and `docs` run again, each reading the revision, and Gate B asks again. Each step is committed to the same branch. A blocked or failed step stops the run; reply on the issue or run `revise` again with clearer feedback.
 
 ## What lands on GitHub
 
