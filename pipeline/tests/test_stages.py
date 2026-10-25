@@ -322,6 +322,16 @@ def test_resume_after_a_failed_review_starts_with_the_fix_round(tmp_path):
     assert "Recheck every finding in review.blocked" in review
 
 
+def test_owner_replies_after_a_failed_review_reach_fix_and_rereview(tmp_path):
+    h = Harness(tmp_path)
+    h.forge.replies = ["Owner sign-off: keep this fixture"]
+    h.queued["review"] = ["Status: fail\n- Required: fixture lacks evidence"]
+    assert h.pipeline().run() is None
+    for prompt in (skill_calls(h, "fix")[0], skill_calls(h, "review")[1]):
+        blocked = staged(prompt, "review.blocked")
+        assert "## Replies on the issue" in blocked and "keep this fixture" in blocked
+
+
 def test_resume_after_a_malformed_review_reruns_the_review(tmp_path):
     h = Harness(tmp_path)
     h.review_reply = "looks fine"

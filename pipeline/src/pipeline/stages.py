@@ -44,8 +44,10 @@ FIX = Stage(
 FIX_NOTE = "This is the only automatic fix round; if findings remain, the run stops."
 RECHECK_NOTE = "The fix stage changed the code after the review failed. Check the code as it is now."
 REREVIEW_NOTE = (
-    f"{RECHECK_NOTE} Recheck every finding in review.blocked; drop one only if the code now fixes it."
+    f"{RECHECK_NOTE} Recheck every finding in review.blocked; drop one only if the code now fixes it "
+    "or a reply on the issue accepts it as is."
 )
+REPLY_INPUTS = ("decisions", "review.blocked")
 
 
 def phase_count(plan: str) -> int:
@@ -161,7 +163,7 @@ class Pipeline:
 
     def _input(self, stage: Stage, name: str) -> str:
         text = self._artifact(name)
-        if stage.name == PLAN.name and name == "decisions" and (replies := self.forge.human_comments_after(name)):
+        if name in REPLY_INPUTS and (replies := self.forge.human_comments_after(name)):
             text += "\n\n## Replies on the issue\n\n" + "\n\n".join(replies)
         return text
 
