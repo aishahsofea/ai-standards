@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
@@ -10,10 +11,21 @@ from pipeline.run_dir import check_artifact
 MAX_COMMENT_CHARS = 65_536
 MARKER = re.compile(r"\A<!-- pipeline:artifact=(\S+) -->")
 EXCLUDE_RUNS = ":!.agent/runs"
+RETRY_DELAYS = (1, 2)
 
 
 class ForgeError(Exception):
     pass
+
+
+def run_command(command: tuple[str, ...], cwd: Path, *, retry: bool = False) -> str:
+    for delay in (*RETRY_DELAYS, None) if retry else (None,):
+        proc = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
+        if proc.returncode == 0:
+            return proc.stdout.strip()
+        if delay is None:
+            raise ForgeError(f"{' '.join(command[:3])} failed: {proc.stderr.strip()}")
+        time.sleep(delay)
 
 
 class Forge(Protocol):
@@ -60,12 +72,8 @@ class Issue:
 
 
 def fetch_issue(repo: Path, ref: str) -> Issue:
-    proc = subprocess.run(
-        ["gh", "issue", "view", ref, "--json", "title,body,url"], cwd=repo, capture_output=True, text=True
-    )
-    if proc.returncode != 0:
-        raise ForgeError(f"gh issue view failed: {proc.stderr.strip()}")
-    return Issue(**json.loads(proc.stdout))
+    output = run_command(("gh", "issue", "view", ref, "--json", "title,body,url"), repo, retry=True)
+    return Issue(**json.loads(output))
 
 
 @dataclass
@@ -192,7 +200,9 @@ class GitHubForge:
 
     def _issue_view(self) -> dict:
         if self._view is None:
-            output = self._run("gh", "issue", "view", self.state.issue_url, "--json", "title,body,url,comments")
+            output = self._run(
+                "gh", "issue", "view", self.state.issue_url, "--json", "title,body,url,comments", retry=True
+            )
             self._view = json.loads(output)
         return self._view
 
@@ -209,7 +219,9 @@ class GitHubForge:
         return match[1] if match else None
 
     def _has_commits_to_review(self) -> bool:
-        base = self._run("gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name")
+        base = self._run(
+            "gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name", retry=True
+        )
         return int(self._run("git", "rev-list", "--count", f"origin/{base}..HEAD") or 0) > 0
 
     def _open_draft_pr(self) -> None:
@@ -218,8 +230,5 @@ class GitHubForge:
         self.state.pr_url = output.splitlines()[-1]
         self.state.save(self.state_path)
 
-    def _run(self, *command: str) -> str:
-        proc = subprocess.run(command, cwd=self.repo, capture_output=True, text=True)
-        if proc.returncode != 0:
-            raise ForgeError(f"{' '.join(command[:3])} failed: {proc.stderr.strip()}")
-        return proc.stdout.strip()
+    def _run(self, *command: str, retry: bool = False) -> str:
+        return run_command(command, self.repo, retry=retry)
