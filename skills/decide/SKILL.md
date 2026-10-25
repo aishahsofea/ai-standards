@@ -17,6 +17,8 @@ The issue and its analysis (files named in the prompt). Read the code and any `A
 2. **Low-stakes and easy to reverse.** Decide it and say why it is cheap to undo (naming, internal structure, defaults, test layout).
 3. **Escalate** if it touches product behavior, scope, a data model, a public API or interface, security, cost, or anything hard to reverse. Also escalate if you cannot ground the choice in evidence. When torn between 2 and 3, escalate.
 
+An interaction-pattern question (modal vs inline, toast vs banner, placement) is bucket 1 only when the repo already settles it, such as a modal used for another action of the same kind; cite that component. Otherwise escalate it.
+
 Add questions the analysis missed if the code reveals them. Do not invent facts or evidence.
 
 ## Output format

@@ -23,4 +23,5 @@ Never ask questions. Your final reply is the findings document; do not write fil
 
 - Cite code as `` `path/from/repo/root:line` ``; the pipeline rejects references to missing files or lines.
 - Open questions are what the issue or code leaves ambiguous. Do not answer them; the decide stage does.
+- If the issue changes the UI and its wording does not fix the interaction pattern (modal vs inline, toast vs banner, placement), raise an open question about it. Name the options.
 - Do not write a plan.
