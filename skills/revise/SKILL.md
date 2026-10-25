@@ -43,3 +43,4 @@ The first line must be exactly `Status: done` or `Status: blocked - <reason>`. A
 - **Superseded** — issue criteria the feedback replaced, or `None.`
 - **Verified** — commands run and their outcome.
 - **Manual checks** — what only a person can judge, as `- [ ]` items, or `None.`
+- **Proposed convention** — one imperative line (for example "Destructive actions confirm in a modal, never inline.") when the feedback is a general rule for this repo's UI, else `None.`. A one-off preference for this feature is `None.`.

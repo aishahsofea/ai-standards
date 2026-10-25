@@ -7,6 +7,7 @@ QUESTION = re.compile(r"(?m)^[\s\-*\d.)]*\**(Q\d+)\b")
 REFERENCE = re.compile(r"`([\w@+-]*[./][\w@./+-]*):(\d+)(?:-(\d+))?`")
 NONE = re.compile(r"(?mi)^\W*None\.?\s*$")
 VERIFY = re.compile(r"(?m)^\W*Verify:(.*)$")
+CONVENTION = re.compile(r"(?m)^[-*] \*\*Proposed convention\*\*\W*(.+)$")
 BULLET = re.compile(r"(?m)^\s*[-*] (.+)$")
 UI_CHANGE = re.compile(r"(?i)\b(button|sidebar|control|menu|icon)s?\b")
 PATTERN = re.compile(r"(?i)\b(modal|dialog|inline|toast|banner|popover|popup|placement|interaction pattern)s?\b")
@@ -73,3 +74,8 @@ def plan_problems(plan: str) -> list[str]:
         elif any(number not in phases for number in covering):
             problems.append(f"acceptance criterion names a phase that does not exist: {entry[:80]}")
     return problems
+
+
+def proposed_convention(revision: str) -> str | None:
+    match = CONVENTION.search(revision)
+    return None if not match or NONE.search(match[1]) else match[1].strip()

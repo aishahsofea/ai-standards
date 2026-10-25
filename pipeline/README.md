@@ -89,7 +89,7 @@ pipeline revise <slug> "Confirm delete in a modal, not inline"
 
 For changes you want after the run, such as UI or UX you dislike. Run it from the target repo any time before you merge. It also runs when you decline Gate B and type feedback.
 
-`revise` takes your feedback as the spec: it writes a failing test, changes the code, and posts a `revision-N` comment (feedback, changes, new acceptance criteria). Then `test`, `review` and `docs` run again, each reading the revision, and Gate B asks again. Each step is committed to the same branch. A blocked or failed step stops the run; reply on the issue or run `revise` again with clearer feedback.
+`revise` takes your feedback as the spec: it writes a failing test, changes the code, and posts a `revision-N` comment (feedback, changes, new acceptance criteria). Then `test`, `review` and `docs` run again, each reading the revision, and Gate B asks again. Each step is committed to the same branch. A blocked or failed step stops the run; reply on the issue or run `revise` again with clearer feedback. When your feedback reads as a general UI rule, the revision proposes it as a convention; the run shows it and asks y/N before appending it to `UX_CONVENTIONS.md` in the target repo, in the same commit. `analyze`, `decide`, `plan`, `implement-phase` and `review` read that file if it exists, and `review` fails a UI change that breaks a rule.
 
 ## What lands on GitHub
 

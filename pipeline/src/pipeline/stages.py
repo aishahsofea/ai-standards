@@ -9,7 +9,7 @@ from pipeline.cost import CostLedger
 from pipeline.forge import Forge, ForgeError
 from pipeline.gates import GATES, PHASE_HEADING, plan_preview, read_feedback
 from pipeline.run_dir import RunDir
-from pipeline.validate import analysis_problems, decisions_problems, plan_problems, reference_problems
+from pipeline.validate import analysis_problems, decisions_problems, plan_problems, proposed_convention, reference_problems
 
 STATUS = re.compile(r"\s*Status:\s*(\w+)", re.IGNORECASE)
 Outcome = Literal["skipped", "done", "blocked"]
@@ -53,6 +53,7 @@ REVISION_RECHECK_NOTE = (
     "the criteria listed in the latest revision as acceptance criteria."
 )
 DOCS_REFRESH_NOTE = "The revise stage changed the feature after the PR text was written. Rewrite it to match the code as it is now."
+CONVENTIONS_FILE = "UX_CONVENTIONS.md"
 REPLY_INPUTS = ("decisions", "review.blocked")
 
 
@@ -226,8 +227,22 @@ class Pipeline:
         for step, note in rechecks:
             if self._execute(step, note) == "blocked":
                 return step.name
+            if step is stage:
+                self._offer_convention(self._artifact(stage.output))
             self.forge.checkpoint(step.commit or f"pipeline: {step.name}")
         return None if self._proceed(docs, True) else docs.name
+
+    def _offer_convention(self, revision: str) -> None:
+        rule = proposed_convention(revision)
+        path = self.run_dir.repo / CONVENTIONS_FILE
+        if not rule or (path.exists() and rule in path.read_text()):
+            return
+        self.show(f"Proposed convention for {CONVENTIONS_FILE}:\n- {rule}")
+        if self.confirm(f"Append it to {CONVENTIONS_FILE}?"):
+            existing = path.read_text() if path.exists() else ""
+            if existing and not existing.endswith("\n"):
+                existing += "\n"
+            path.write_text(f"{existing}- {rule}\n")
 
     def _fix_round(self, test: Stage, review: Stage) -> str | None:
         """Runs fix, test and review once after a failed review; returns the stage it stopped at, or None if the review passes."""

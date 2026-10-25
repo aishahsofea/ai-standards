@@ -594,3 +594,46 @@ def test_revise_works_on_a_run_that_stopped_before_test(tmp_path):
     revise = skill_calls(h, "revise")[0]
     assert "flaky" in staged(revise, "test.blocked") and "phase-1-summary" in revise
     assert h.forge.has_artifact("test-report") and h.forge.has_artifact("pr")
+
+
+RULE = "Destructive actions confirm in a modal, never inline."
+CONVENTION_REVISION = f"Status: done\n- **Proposed convention** — {RULE}"
+
+
+def revise_with_convention(tmp_path, answer, existing=None):
+    tmp_path.mkdir(exist_ok=True)
+    h = Harness(tmp_path, answers=lambda q: answer if "Append it" in q else True)
+    h.pipeline().run()
+    h.queued["revise"] = [CONVENTION_REVISION]
+    h.shown.clear()
+    path = h.run_dir.repo / "UX_CONVENTIONS.md"
+    if existing is not None:
+        path.write_text(existing)
+    h.pipeline().revise("Use a modal to confirm delete")
+    return h, path
+
+
+def test_revise_appends_a_confirmed_convention(tmp_path):
+    h, path = revise_with_convention(tmp_path / "run", True, existing="- Toasts for success.")
+    assert path.read_text() == f"- Toasts for success.\n- {RULE}\n"
+    assert any(RULE in message for message in h.shown)
+
+
+def test_revise_creates_the_conventions_file_when_missing(tmp_path):
+    _, path = revise_with_convention(tmp_path, True)
+    assert path.read_text() == f"- {RULE}\n"
+
+
+def test_revise_leaves_the_file_alone_when_the_convention_is_declined(tmp_path):
+    _, path = revise_with_convention(tmp_path, False)
+    assert not path.exists()
+
+
+def test_revise_does_not_ask_when_there_is_no_convention_or_it_is_already_listed(tmp_path):
+    h = Harness(tmp_path)
+    h.pipeline().run()
+    h.queued["revise"] = ["Status: done\n- **Proposed convention** — None."]
+    h.pipeline().revise("one-off")
+    assert not any("Append it" in q for q in h.questions)
+    h, _ = revise_with_convention(tmp_path / "again", True, existing=f"- {RULE}\n")
+    assert not any("Append it" in q for q in h.questions)

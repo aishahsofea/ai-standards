@@ -107,3 +107,10 @@ def test_every_acceptance_criterion_needs_a_covering_phase():
     assert plan_problems(PLAN.replace("## Acceptance criteria", "## Criteria")) == [
         "missing a '## Acceptance criteria' section mapping each criterion to a phase"
     ]
+
+
+def test_proposed_convention_reads_the_rule_and_ignores_none():
+    from pipeline.validate import proposed_convention
+    assert proposed_convention("- **Proposed convention** — Use a modal.\n- **Verified** — ok") == "Use a modal."
+    assert proposed_convention("- **Proposed convention** — None.") is None
+    assert proposed_convention("- **Verified** — ok") is None
