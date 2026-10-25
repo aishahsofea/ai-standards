@@ -162,3 +162,8 @@ def test_real_agent_may_read_skills_and_staged_inputs(tmp_path, monkeypatch, fak
     run_in(tmp_path, "--stop-after", "issue")
     add_dirs = built[0][4]
     assert cli.SKILLS_DIR in add_dirs and len(add_dirs) == 2
+
+
+def test_revise_unknown_run_fails_cleanly(tmp_path, capsys):
+    assert main(["revise", "nothing", "make it a modal", "--repo", str(tmp_path)]) == 1
+    assert "no run 'nothing'" in capsys.readouterr().err

@@ -3,9 +3,9 @@ import shutil
 import tempfile
 from pathlib import Path
 
-STAGE_NAME = r"issue|analyze|decide|plan|implement-phase-[1-9]\d*|test|review|fix|docs"
+STAGE_NAME = r"issue|analyze|decide|plan|implement-phase-[1-9]\d*|test|review|fix|revise|docs"
 ARTIFACT_NAME = re.compile(
-    rf"issue|analysis|decisions|plan|test-report|review|fix-summary|pr|cost|phase-[1-9]\d*-summary|(?:{STAGE_NAME})\.blocked"
+    rf"issue|analysis|decisions|plan|test-report|review|fix-summary|revision-[1-9]\d*|pr|cost|phase-[1-9]\d*-summary|(?:{STAGE_NAME})\.blocked"
 )
 MAX_SLUG_LENGTH = 50
 

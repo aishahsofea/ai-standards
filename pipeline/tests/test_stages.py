@@ -40,6 +40,8 @@ def respond(prompt):
         return "Status: pass\nok"
     if "/review/SKILL.md" in prompt:
         return "Status: pass\nok"
+    if "/revise/SKILL.md" in prompt:
+        return "Status: done\nrevised"
     if "/fix/SKILL.md" in prompt:
         return "Status: done\nfixed"
     return "content"
@@ -233,7 +235,7 @@ def test_forge_gets_issue_then_checkpoint_per_executed_stage(tmp_path):
 
 
 def test_declining_gate_b_does_not_finish(tmp_path):
-    h = Harness(tmp_path, answers=lambda q: "Mark the PR" not in q)
+    h = Harness(tmp_path, answers=lambda q: "Mark the PR" not in q, ask=lambda p: "" if "What should change" in p else "sqlite")
     assert h.pipeline().run() == "docs"
     assert all(call[0] != "finish" for call in h.forge.calls)
 
@@ -536,3 +538,59 @@ def test_gate_a_plain_answers_do_not_rerun_decide(tmp_path):
     h = Harness(tmp_path, ask=lambda _: "sqlite")
     h.pipeline().run()
     assert sum("/decide/SKILL.md" in call[0] for call in h.agent.calls) == 1
+
+
+def test_revise_applies_feedback_then_rechecks_and_refreshes_the_pr(tmp_path):
+    h = Harness(tmp_path)
+    h.pipeline().run()
+    h.agent.calls.clear()
+    h.forge.calls.clear()
+    assert h.pipeline().revise("Use a modal to confirm delete") is None
+    revise = skill_calls(h, "revise")[0]
+    assert "Use a modal to confirm delete" in revise
+    assert "revised" in h.forge.artifacts["revision-1"]
+    for skill in ("test", "review", "docs"):
+        assert "revised" in staged(skill_calls(h, skill)[0], "revision-1")
+    assert [c[1] for c in h.forge.calls if c[0] == "checkpoint"] == [
+        "revise 1: apply owner feedback", "pipeline: test", "pipeline: review", "pipeline: docs",
+    ]
+    assert h.forge.calls[-1][0] == "finish"
+
+
+def test_second_revision_gets_the_next_number_and_sees_the_first(tmp_path):
+    h = Harness(tmp_path)
+    h.pipeline().run()
+    h.pipeline().revise("one")
+    h.pipeline().revise("two")
+    assert "revision-2" in h.forge.artifacts
+    assert "revised" in staged(skill_calls(h, "revise")[1], "revision-1")
+
+
+def test_blocked_revise_stops_before_rechecking(tmp_path):
+    h = Harness(tmp_path)
+    h.pipeline().run()
+    h.agent.calls.clear()
+    h.queued["revise"] = ["Status: blocked - feedback too vague"]
+    assert h.pipeline().revise("make it nicer") == "revise"
+    assert "revise.blocked" in h.forge.artifacts and not h.forge.has_artifact("revision-1")
+    assert not skill_calls(h, "test")
+
+
+def test_declining_gate_b_with_feedback_runs_revise_and_asks_again(tmp_path):
+    answers = iter([False, True])
+    h = Harness(tmp_path, answers=lambda q: next(answers) if "Mark the PR" in q else True, ask=lambda p: "modal please" if "What should change" in p else "sqlite")
+    assert h.pipeline().run() is None
+    assert "modal please" in skill_calls(h, "revise")[0]
+    assert h.forge.calls[-1][0] == "finish"
+
+
+
+def test_revise_works_on_a_run_that_stopped_before_test(tmp_path):
+    h = Harness(tmp_path)
+    h.queued["test"] = ["Status: fail\nflaky"]
+    assert h.pipeline().run() == "test"
+    h.agent.calls.clear()
+    assert h.pipeline().revise("Use a modal") is None
+    revise = skill_calls(h, "revise")[0]
+    assert "flaky" in staged(revise, "test.blocked") and "phase-1-summary" in revise
+    assert h.forge.has_artifact("test-report") and h.forge.has_artifact("pr")

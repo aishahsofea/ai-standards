@@ -7,7 +7,7 @@ from typing import Literal
 from pipeline.agent import Agent, Denial, Result
 from pipeline.cost import CostLedger
 from pipeline.forge import Forge, ForgeError
-from pipeline.gates import GATES, PHASE_HEADING, plan_preview
+from pipeline.gates import GATES, PHASE_HEADING, plan_preview, read_feedback
 from pipeline.run_dir import RunDir
 from pipeline.validate import analysis_problems, decisions_problems, plan_problems, reference_problems
 
@@ -47,6 +47,12 @@ REREVIEW_NOTE = (
     f"{RECHECK_NOTE} Recheck every finding in review.blocked; drop one only if the code now fixes it "
     "or a reply on the issue accepts it as is."
 )
+REVISE_NOTE = "Apply this owner feedback to the finished feature, and nothing else:"
+REVISION_RECHECK_NOTE = (
+    "The revise stage changed the code to apply owner feedback. Check the code as it is now, and treat "
+    "the criteria listed in the latest revision as acceptance criteria."
+)
+DOCS_REFRESH_NOTE = "The revise stage changed the feature after the PR text was written. Rewrite it to match the code as it is now."
 REPLY_INPUTS = ("decisions", "review.blocked")
 
 
@@ -102,6 +108,13 @@ def closing_stages(phases: int) -> tuple[Stage, Stage, Stage]:
             statuses=("pass", "fail"), read_only=True,
         ),
         Stage("docs", "docs", ("plan", *summaries, "test-report", "review"), "pr", "sonnet", 20),
+    )
+
+
+def revise_stage(number: int, inputs: tuple[str, ...]) -> Stage:
+    return Stage(
+        "revise", "revise", inputs, f"revision-{number}", "sonnet", 60,
+        statuses=("done", "blocked"), commit=f"revise {number}: apply owner feedback",
     )
 
 
@@ -197,6 +210,25 @@ class Pipeline:
             self.forge.post_artifact(stage.output, result.text)
         return "done"
 
+    def revise(self, feedback: str) -> str | None:
+        """Applies owner feedback, rechecks, rewrites the PR text and asks Gate B again; returns the stage it stopped at, or None when finished."""
+        phases = phase_count(self._artifact("plan"))
+        earlier = tuple(name for n in range(1, 100) if self.forge.has_artifact(name := f"revision-{n}"))
+        context = ("issue", "plan", *map(phase_summary, range(1, phases + 1)), "test-report", "test.blocked", "review", "review.blocked", "pr", *earlier)
+        stage = revise_stage(len(earlier) + 1, tuple(name for name in context if self.forge.has_artifact(name)))
+        test, review, docs = closing_stages(phases)
+        rechecks = (
+            (stage, f"{REVISE_NOTE}\n{feedback}"),
+            (replace(test, inputs=(*test.inputs, stage.output)), REVISION_RECHECK_NOTE),
+            (replace(review, inputs=(*review.inputs, stage.output)), REVISION_RECHECK_NOTE),
+            (replace(docs, inputs=(*docs.inputs, stage.output)), DOCS_REFRESH_NOTE),
+        )
+        for step, note in rechecks:
+            if self._execute(step, note) == "blocked":
+                return step.name
+            self.forge.checkpoint(step.commit or f"pipeline: {step.name}")
+        return None if self._proceed(docs, True) else docs.name
+
     def _fix_round(self, test: Stage, review: Stage) -> str | None:
         """Runs fix, test and review once after a failed review; returns the stage it stopped at, or None if the review passes."""
         self.show("review failed; running one fix round")
@@ -254,6 +286,8 @@ class Pipeline:
                         return False
                     self.show(gate.preview(self._artifact(gate.artifact)))
             approved = self.confirm(gate.message)
+            if not approved and gate.revisable and self.ask and (feedback := read_feedback(self.ask)):
+                return self.revise(feedback) is None
             if approved and (open_items := gate.unresolved(self._artifact(gate.artifact))):
                 self.show(f"{len(open_items)} escalated question(s) still have no answer; answer them, then --resume.")
                 return False

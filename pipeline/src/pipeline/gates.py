@@ -26,6 +26,7 @@ class Gate:
     answer: Callable[[str, Callable[[str], str]], str] | None = None
     unresolved: Callable[[str], list[str]] = lambda _: []
     needs_rerun: Callable[[str], bool] = lambda _: False
+    revisable: bool = False
 
 
 def section(text: str, heading: str) -> str:
@@ -90,6 +91,13 @@ def plan_preview(plan: str) -> str:
     return "\n\n".join(part for part in (phases, section(plan, "Assumptions"), section(plan, "Out of scope")) if part)
 
 
+def read_feedback(ask: Callable[[str], str]) -> str:
+    reply = ask("What should change? (Enter to stop, m multi-line): ").strip()
+    if reply.lower() == "m":
+        reply = "\n".join(iter(lambda: ask("  > ").rstrip(), "")).strip()
+    return reply
+
+
 def confirm(question: str, ask: Callable[[str], str] = input) -> bool:
     return ask(f"{question} [y/N] ").strip().lower() in {"y", "yes"}
 
@@ -99,5 +107,5 @@ GATE_A = Gate(
     "decisions", decisions_preview, needs_input=lambda decisions: bool(escalated_entries(decisions)), answer=answer_escalated,
     unresolved=escalated_entries, needs_rerun=lambda decisions: bool(REVISIT.search(decisions)),
 )
-GATE_B = Gate("docs", "Reviewed the PR text and changes. Mark the PR ready?", "pr", str.strip, publishes=True)
+GATE_B = Gate("docs", "Reviewed the PR text and changes. Mark the PR ready?", "pr", str.strip, publishes=True, revisable=True)
 GATES = {gate.after: gate for gate in (GATE_A, GATE_B)}

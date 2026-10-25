@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from pipeline.agent import AgentError, Denial, FakeAgent
@@ -46,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true", help="use a fake agent and forge in a temp repo")
     run.add_argument("--repo", type=Path, default=Path.cwd(), help="target repo (default: current directory)")
     run.add_argument("--stop-after", metavar="STAGE", help="stop once this stage finishes")
+    revise = commands.add_parser("revise", help="apply your feedback to a finished run's branch")
+    revise.add_argument("slug", help="the run to revise")
+    revise.add_argument("feedback", help="what should change")
+    revise.add_argument("--repo", type=Path, default=Path.cwd(), help="target repo (default: current directory)")
+    revise.set_defaults(dry_run=False)
     return parser
 
 
@@ -57,20 +63,9 @@ def post_cost(forge: Forge, ledger: CostLedger) -> None:
         print(f"could not post the cost comment: {error}\n{table}", file=sys.stderr)
 
 
-def run_pipeline(args: argparse.Namespace) -> int:
-    repo = Path(tempfile.mkdtemp(prefix="pipeline-dry-run-")) if args.dry_run else args.repo.resolve()
-    node_bin = None if args.dry_run else resolve_node_bin(repo)
-    issue = fetch_issue(repo, args.issue) if args.issue else None
-    slug = args.resume or (slugify(f"{issue.number} {issue.title}") if issue else slugify(args.idea))
+def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -> tuple[Pipeline, RunDir, Forge, CostLedger]:
     run_dir = RunDir(repo, slug)
     state_path = run_dir.state_path
-    if args.resume and not state_path.exists():
-        raise ForgeError(f"no run '{slug}' in {repo}")
-    if args.resume or (issue and state_path.exists()):
-        state = RunState.load(state_path)
-    else:
-        state = RunState(issue.title, issue.url) if issue else RunState(args.idea)
-
     forge: Forge = FakeForge() if args.dry_run else GitHubForge(repo, slug, state, state_path)
     forge.start_branch()
     state.save(state_path)
@@ -84,6 +79,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         approved.extend(allowed)
         return bool(allowed)
 
+    node_bin = None if args.dry_run else resolve_node_bin(repo)
     agent_for = (
         (lambda stage: fake_agent) if args.dry_run
         else (lambda stage: ClaudeAgent(repo, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging), node_bin, (*allowed_tools(repo, stage.read_only), *approved)))
@@ -92,12 +88,16 @@ def run_pipeline(args: argparse.Namespace) -> int:
     ledger = CostLedger(budget, prior_total(forge.read_artifact("cost")))
     pipeline = Pipeline(
         run_dir, ledger, agent_for, SKILLS_DIR, state.idea,
-        (lambda _: True) if args.dry_run else confirm, print, forge, stop_after=args.stop_after,
+        (lambda _: True) if args.dry_run else confirm, print, forge, stop_after=getattr(args, "stop_after", None),
         ask=None if args.dry_run else input,
         approve=None if args.dry_run else approve_denials,
     )
+    return pipeline, run_dir, forge, ledger
+
+
+def finish_run(pipeline_run: Callable[[], str | None], run_dir: RunDir, forge: Forge, ledger: CostLedger, slug: str) -> int:
     try:
-        stopped = pipeline.run()
+        stopped = pipeline_run()
     finally:
         post_cost(forge, ledger)
         run_dir.close()
@@ -107,6 +107,30 @@ def run_pipeline(args: argparse.Namespace) -> int:
     else:
         print(f"Stopped at '{stopped}'; {spent}. Resume with: pipeline run --resume {slug}")
     return 0
+
+
+def run_pipeline(args: argparse.Namespace) -> int:
+    repo = Path(tempfile.mkdtemp(prefix="pipeline-dry-run-")) if args.dry_run else args.repo.resolve()
+    issue = fetch_issue(repo, args.issue) if args.issue else None
+    slug = args.resume or (slugify(f"{issue.number} {issue.title}") if issue else slugify(args.idea))
+    state_path = RunDir(repo, slug).state_path
+    if args.resume and not state_path.exists():
+        raise ForgeError(f"no run '{slug}' in {repo}")
+    if args.resume or (issue and state_path.exists()):
+        state = RunState.load(state_path)
+    else:
+        state = RunState(issue.title, issue.url) if issue else RunState(args.idea)
+    pipeline, run_dir, forge, ledger = open_run(args, repo, slug, state)
+    return finish_run(pipeline.run, run_dir, forge, ledger, slug)
+
+
+def revise_pipeline(args: argparse.Namespace) -> int:
+    repo = args.repo.resolve()
+    state_path = RunDir(repo, args.slug).state_path
+    if not state_path.exists():
+        raise ForgeError(f"no run '{args.slug}' in {repo}")
+    pipeline, run_dir, forge, ledger = open_run(args, repo, args.slug, RunState.load(state_path))
+    return finish_run(lambda: pipeline.revise(args.feedback), run_dir, forge, ledger, args.slug)
 
 
 def run_eval(args: argparse.Namespace) -> int:
@@ -135,12 +159,13 @@ def main(argv: list[str] | None = None) -> int:
         except AgentError as error:
             print(f"error: {error}", file=sys.stderr)
             return 1
-    if sum(map(bool, (args.idea, args.resume, args.issue))) != 1:
-        parser.error("give exactly one of: an idea, --issue REF, --resume SLUG")
-    if args.dry_run and (args.resume or args.issue):
-        parser.error("--dry-run cannot resume or use --issue")
+    if args.command == "run":
+        if sum(map(bool, (args.idea, args.resume, args.issue))) != 1:
+            parser.error("give exactly one of: an idea, --issue REF, --resume SLUG")
+        if args.dry_run and (args.resume or args.issue):
+            parser.error("--dry-run cannot resume or use --issue")
     try:
-        return run_pipeline(args)
+        return run_pipeline(args) if args.command == "run" else revise_pipeline(args)
     except (AgentError, BudgetExceeded, ForgeError, GateError, NodeNotFound) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
