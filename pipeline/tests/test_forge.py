@@ -242,3 +242,26 @@ def test_fake_forge_round_trip_and_validation():
     assert forge.posts == ["plan", "plan"]
     with pytest.raises(ForgeError, match="'pr'"):
         forge.post_artifact("pr", "x" * 70_000)
+
+
+def test_reads_retry_transient_failures(make, monkeypatch):
+    monkeypatch.setattr("pipeline.forge.time.sleep", lambda _: None)
+    replies = iter([None, None, '{"title": "T", "body": "B", "url": "u"}'])
+    _, shell, _ = make(gh_issue=lambda: next(replies))
+    assert fetch_issue(Path("."), "7") == Issue("T", "B", "u")
+    assert len(shell.ran("gh", "issue", "view")) == 3
+
+
+def test_reads_give_up_after_retries(make, monkeypatch):
+    monkeypatch.setattr("pipeline.forge.time.sleep", lambda _: None)
+    _, shell, _ = make(gh_issue=None)
+    with pytest.raises(ForgeError, match="gh issue view failed"):
+        fetch_issue(Path("."), "7")
+    assert len(shell.ran("gh", "issue", "view")) == 3
+
+
+def test_writes_are_not_retried(make):
+    forge, shell, _ = make(gh_issue=None)
+    with pytest.raises(ForgeError, match="gh issue create failed"):
+        forge.open_issue("Title", "Body")
+    assert len(shell.ran("gh", "issue", "create")) == 1
