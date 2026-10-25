@@ -10,7 +10,7 @@ Never ask questions. Your final reply is the findings document; do not write fil
 ## Steps
 
 1. Read the issue file named in the prompt: title, description, acceptance criteria, and constraints raised in comments.
-2. Research the current code. Locate the files, modules and tests the issue touches, and read enough to know how they behave. Honor any `AGENTS.md`/`CONTEXT.md` in the repo.
+2. Research the current code. Locate the files, modules and tests the issue touches, and read enough to know how they behave. Honor any `AGENTS.md`/`CONTEXT.md` in the repo, and `UX_CONVENTIONS.md` in the repo root if it exists. A UI question it already answers is not an open question.
 3. Reply with these `##` sections, in order:
    - **Problem**: what the issue asks for, in your own words.
    - **Current state**: how the code works today.

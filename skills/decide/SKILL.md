@@ -9,7 +9,7 @@ Turn the open questions in an analysis into decisions, and escalate only what a 
 
 ## Inputs
 
-The issue and its analysis (files named in the prompt). Read the code and any `AGENTS.md`/`CONTEXT.md` before deciding. Headless: never ask questions; your final reply is the `decisions.md` document.
+The issue and its analysis (files named in the prompt). Read the code and any `AGENTS.md`/`CONTEXT.md` before deciding, and `UX_CONVENTIONS.md` in the repo root if it exists. A rule there that matches a question already decides it: record it under "Decided from evidence" and cite it as `UX_CONVENTIONS.md:<line>`. Headless: never ask questions; your final reply is the `decisions.md` document.
 
 ## Sort each open question into one bucket
 

@@ -18,7 +18,8 @@ Review the finished feature as an independent reviewer. Headless (the prompt say
    - **Security**: input and external data validated at boundaries; authorization checked; no injection or XSS; no secrets. New or upgraded dependencies: needed, maintained, lockfile diff matches.
    - **Performance**: no N+1 queries, unbounded loops or fetches, or needless re-renders.
 4. Check the diff against the definition of done: `DEFINITION_OF_DONE.md` in the repo root if it exists, else [the built-in default](../DEFINITION_OF_DONE.md). Each unmet item is a Required finding.
-5. Label every finding `Critical` (breaks behavior or is unsafe), `Required` (must change before merge), or `Nit` (optional). Give `file:line` and the fix for each.
+5. If `UX_CONVENTIONS.md` exists in the repo root, check each UI change in the diff against its rules. A broken rule is a Required finding that cites the rule.
+6. Label every finding `Critical` (breaks behavior or is unsafe), `Required` (must change before merge), or `Nit` (optional). Give `file:line` and the fix for each.
 
 ## Rules
 
