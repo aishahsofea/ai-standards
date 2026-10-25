@@ -8,6 +8,8 @@ REFERENCE = re.compile(r"`([\w@+-]*[./][\w@./+-]*):(\d+)(?:-(\d+))?`")
 NONE = re.compile(r"(?mi)^\W*None\.?\s*$")
 VERIFY = re.compile(r"(?m)^\W*Verify:(.*)$")
 BULLET = re.compile(r"(?m)^\s*[-*] (.+)$")
+UI_CHANGE = re.compile(r"(?i)\b(button|sidebar|control|menu|icon)s?\b")
+PATTERN = re.compile(r"(?i)\b(modal|dialog|inline|toast|banner|popover|popup|placement|interaction pattern)s?\b")
 
 
 def question_ids(text: str) -> list[str]:
@@ -25,12 +27,14 @@ def reference_problems(text: str, repo: Path) -> list[str]:
     return problems
 
 
-def analysis_problems(analysis: str) -> list[str]:
+def analysis_problems(analysis: str, issue: str = "") -> list[str]:
     questions = section(analysis, "Open questions")
     if not questions:
         return ["missing a '## Open questions' section"]
     if not question_ids(questions) and not NONE.search(questions):
         return ["number each open question Q1, Q2, ... or write 'None.' under '## Open questions'"]
+    if UI_CHANGE.search(issue) and not PATTERN.search(issue) and not PATTERN.search(questions):
+        return ["the issue changes the UI without fixing the interaction pattern; raise an open question on it (modal vs inline, toast vs banner, placement)"]
     return []
 
 

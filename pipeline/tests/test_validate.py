@@ -36,6 +36,17 @@ def test_analysis_needs_numbered_open_questions():
     ]
 
 
+def test_analysis_must_ask_about_the_interaction_pattern_of_ui_issues():
+    open_ended = "Add a delete button to each sidebar row with a confirm step."
+    asked = "## Open questions\n- **Q1:** Should the confirm step be a modal or inline?\n"
+    assert analysis_problems(asked, open_ended) == []
+    assert analysis_problems(ANALYSIS, open_ended) == [
+        "the issue changes the UI without fixing the interaction pattern; raise an open question on it (modal vs inline, toast vs banner, placement)"
+    ]
+    assert analysis_problems(ANALYSIS, "Add a delete button that opens a confirm modal.") == []
+    assert analysis_problems(ANALYSIS, "Add a CSV export endpoint.") == []
+
+
 def test_valid_decisions_have_no_problems():
     assert decisions_problems(DECISIONS, ANALYSIS) == []
 

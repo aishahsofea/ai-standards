@@ -255,7 +255,7 @@ class Pipeline:
 
     def _problems(self, stage: Stage, text: str) -> list[str]:
         if stage.name == ANALYZE.name:
-            return analysis_problems(text) + reference_problems(text, self.run_dir.repo)
+            return analysis_problems(text, self._artifact("issue")) + reference_problems(text, self.run_dir.repo)
         if stage.name == DECIDE.name:
             return decisions_problems(text, self._artifact("analysis")) + reference_problems(text, self.run_dir.repo)
         if stage.name == PLAN.name:
