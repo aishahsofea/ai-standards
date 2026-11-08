@@ -9,7 +9,7 @@ Write a phased implementation plan from the issue, its analysis, and `decisions.
 
 ## Inputs
 
-The issue, analysis, and decisions files named in the prompt. Read the code the work touches and any `AGENTS.md`/`CONTEXT.md` first, and `UX_CONVENTIONS.md` in the repo root if it exists; UI work follows its rules.
+The issue, analysis, and decisions files named in the prompt. Read the code the work touches and any `AGENTS.md`/`CONTEXT.md` first. Where the decisions do not fix a UI pattern, follow the [ui-conventions](../ui-conventions/SKILL.md) skill.
 
 - Every decided and escalated answer in `decisions.md` is binding.
 - If an escalated entry still says `_pending_`, use its recommendation and list it under `## Assumptions`.

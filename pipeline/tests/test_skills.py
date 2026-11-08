@@ -9,6 +9,8 @@ def test_test_and_review_skills_use_the_definition_of_done():
         assert "DEFINITION_OF_DONE.md" in text and "../DEFINITION_OF_DONE.md" in text
 
 
-def test_stages_that_shape_ui_read_the_ux_conventions():
-    for skill in ("analyze", "decide", "plan", "implement-phase", "review"):
-        assert "`UX_CONVENTIONS.md`" in (SKILLS_DIR / skill / "SKILL.md").read_text()
+def test_stages_that_shape_ui_use_the_ui_conventions_skill():
+    assert "`UX_CONVENTIONS.md`" in (SKILLS_DIR / "ui-conventions" / "SKILL.md").read_text()
+    assert "`UX_CONVENTIONS.md`" in (SKILLS_DIR / "review" / "SKILL.md").read_text()
+    for skill in ("analyze", "decide", "plan", "implement-phase", "revise"):
+        assert "](../ui-conventions/SKILL.md)" in (SKILLS_DIR / skill / "SKILL.md").read_text()
