@@ -81,7 +81,24 @@ def test_checkpoint_commits_pushes_and_opens_draft_pr_once(make):
 def test_checkpoint_excludes_run_state_from_commits(make):
     forge, shell, _ = make()
     forge.checkpoint("plan")
-    assert shell.ran("git", "add", "-A", "--", ".", ":!.agent/runs")
+    assert shell.ran("git", "ls-files", "-z", "--others", "--exclude-standard", "--", ".", ":!.agent/runs")
+    assert shell.ran("git", "diff", "-z", "--name-only", "HEAD", "--", ".", ":!.agent/runs")
+
+
+def test_checkpoint_stages_only_paths_changed_since_start(make):
+    listings = iter(["stray.md", "stray.md\0src/new.py"])
+    forge, shell, _ = make(git_ls=lambda: next(listings))
+    forge.start_branch()
+    forge.checkpoint("test")
+    assert shell.ran("git", "add", "-A", "--", ":(literal)src/new.py")
+    assert not [c for c in shell.ran("git", "add") if any("stray.md" in arg for arg in c)]
+
+
+def test_checkpoint_stages_nothing_when_only_preexisting_paths_are_dirty(make):
+    forge, shell, _ = make(git_ls="stray.md")
+    forge.start_branch()
+    forge.checkpoint("test")
+    assert not shell.ran("git", "add")
 
 
 def test_checkpoint_skips_commit_when_nothing_staged(make):
@@ -114,7 +131,7 @@ def test_finish_updates_body_and_marks_ready(make):
 
 
 def test_command_failure_raises(make):
-    forge, _, _ = make(git_add=None)
+    forge, _, _ = make(git_ls="a.py", git_add=None)
     with pytest.raises(ForgeError, match="nope"):
         forge.checkpoint("issue")
 

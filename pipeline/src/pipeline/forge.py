@@ -133,6 +133,7 @@ class GitHubForge:
         self.state = state
         self.state_path = state_path
         self._view: dict | None = None
+        self._preexisting: set[str] = set()
 
     def start_branch(self) -> None:
         if self._run("git", "branch", "--list", self.branch):
@@ -141,6 +142,7 @@ class GitHubForge:
             raise ForgeError("working tree has uncommitted changes; commit or stash them first")
         else:
             self._run("git", "checkout", "-b", self.branch)
+        self._preexisting = self._changed_paths()
 
     def open_issue(self, title: str, body: str) -> None:
         if self.state.issue_url:
@@ -151,7 +153,8 @@ class GitHubForge:
         self._view = None
 
     def checkpoint(self, message: str) -> None:
-        self._run("git", "add", "-A", "--", ".", EXCLUDE_RUNS)
+        if paths := sorted(self._changed_paths() - self._preexisting):
+            self._run("git", "add", "-A", "--", *(f":(literal){path}" for path in paths))
         if self._run("git", "diff", "--cached", "--name-only"):
             self._run("git", "commit", "-m", message)
         self._run("git", "push", "-u", "origin", self.branch)
@@ -197,6 +200,11 @@ class GitHubForge:
         if position is None:
             return []
         return [c["body"] for c in comments[position + 1 :] if not self._artifact_name(c)]
+
+    def _changed_paths(self) -> set[str]:
+        untracked = self._run("git", "ls-files", "-z", "--others", "--exclude-standard", "--", ".", EXCLUDE_RUNS)
+        modified = self._run("git", "diff", "-z", "--name-only", "HEAD", "--", ".", EXCLUDE_RUNS)
+        return {path for path in f"{untracked}\0{modified}".split("\0") if path}
 
     def _issue_view(self) -> dict:
         if self._view is None:
