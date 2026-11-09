@@ -116,6 +116,7 @@ class RunState:
     idea: str
     issue_url: str = ""
     pr_url: str = ""
+    baseline: list[str] | None = None
 
     @classmethod
     def load(cls, path: Path) -> "RunState":
@@ -192,7 +193,9 @@ class GitHubForge:
             raise ForgeError("working tree has uncommitted changes; commit or stash them first")
         else:
             self._run("git", "checkout", "-b", self.branch)
-        self._preexisting = self._changed_paths()
+        if self.state.baseline is None:
+            self.state.baseline = sorted(self._changed_paths())
+        self._preexisting = set(self.state.baseline)
 
     def open_issue(self, title: str, body: str) -> None:
         if self.state.issue_url:
@@ -212,6 +215,7 @@ class GitHubForge:
             self._open_draft_pr()
 
     def finish(self, pr_body: str) -> None:
+        self._run("git", "push", "-u", "origin", self.branch)
         if not self.state.pr_url:
             self._open_draft_pr()
         self._run("gh", "pr", "edit", self.state.pr_url, "--body", f"{pr_body}\n\nCloses {self.state.issue_url}")

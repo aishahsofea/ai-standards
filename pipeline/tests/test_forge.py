@@ -101,6 +101,22 @@ def test_checkpoint_stages_nothing_when_only_preexisting_paths_are_dirty(make):
     assert not shell.ran("git", "add")
 
 
+def test_resume_keeps_the_baseline_from_the_first_start(make):
+    listings = iter(["stray.md", "stray.md\0src/new.py"])
+    forge, shell, state = make(git_ls=lambda: next(listings))
+    forge.start_branch()
+    assert state.baseline == ["stray.md"]
+    forge.start_branch()
+    forge.checkpoint("phase 1")
+    assert shell.ran("git", "add", "-A", "--", ":(literal)src/new.py")
+
+
+def test_run_state_without_baseline_loads_from_older_files(tmp_path):
+    path = tmp_path / "state.json"
+    path.write_text('{"idea": "x", "issue_url": "", "pr_url": ""}')
+    assert RunState.load(path).baseline is None
+
+
 def test_checkpoint_skips_commit_when_nothing_staged(make):
     forge, shell, state = make()
     state.pr_url = "https://github.com/o/r/pull/9"
@@ -125,9 +141,19 @@ def test_finish_updates_body_and_marks_ready(make):
     forge, shell, state = make()
     state.pr_url, state.issue_url = "https://github.com/o/r/pull/9", "https://github.com/o/r/issues/7"
     forge.finish("PR text")
+    assert shell.ran("git", "push", "-u", "origin", "agent/add-dark-mode")
     edit = shell.ran("gh", "pr", "edit")[0]
     assert edit[-1] == "PR text\n\nCloses https://github.com/o/r/issues/7"
     assert shell.ran("gh", "pr", "ready", "https://github.com/o/r/pull/9")
+
+
+def test_finish_pushes_before_opening_a_missing_pr(make):
+    forge, shell, state = make(gh_pr="https://github.com/o/r/pull/9")
+    state.issue_url = "https://github.com/o/r/issues/7"
+    forge.finish("PR text")
+    commands = [c[:2] for c in shell.commands]
+    assert commands.index(("git", "push")) < commands.index(("gh", "pr"))
+    assert state.pr_url == "https://github.com/o/r/pull/9"
 
 
 def test_command_failure_raises(make):
