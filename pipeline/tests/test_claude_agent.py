@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.agent import AgentError, Denial, FakeAgent
+from pipeline.agent import AgentError, Denial, FakeAgent, Result
 from pipeline.claude_agent import ClaudeAgent
 
 
@@ -81,6 +81,41 @@ def test_fake_agent_records_calls():
     result = fake.run("abc", "haiku", 1.0)
     assert (result.text, result.cost_usd) == ("ABC", 0.1)
     assert fake.calls == [("abc", "haiku", 1.0)]
+
+
+def test_parses_session_id(agent, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: completed(payload(session_id="abc")))
+    assert agent.run("hi", "sonnet", 1.0).session_id == "abc"
+
+
+def test_session_id_defaults_to_empty(agent, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: completed(payload()))
+    assert agent.run("hi", "sonnet", 1.0).session_id == ""
+
+
+def test_no_resume_flag_by_default(agent, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(command=command) or completed(payload()))
+    agent.run("hi", "sonnet", 1.0)
+    assert "--resume" not in seen["command"]
+
+
+def test_resume_continues_the_session_and_bills_only_the_new_cost(agent, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(command=command) or completed(payload(total_cost_usd=0.75)))
+    result = agent.run("again", "sonnet", 2.0, resume=Result("first", 0.5, session_id="abc"))
+    command = seen["command"]
+    assert command[command.index("--resume") + 1] == "abc"
+    assert command[command.index("--max-budget-usd") + 1] == "2.5"
+    assert result.cost_usd == pytest.approx(0.25)
+
+
+def test_fake_agent_marks_resumed_calls():
+    fake = FakeAgent()
+    first = fake.run("full", "haiku", 1.0)
+    second = fake.run("short", "haiku", 1.0, resume=first)
+    assert second.session_id == first.session_id != ""
+    assert fake.resumes == [("short", first.session_id)]
 
 
 def test_runs_in_auto_mode_and_never_commits_or_pushes(agent, monkeypatch):

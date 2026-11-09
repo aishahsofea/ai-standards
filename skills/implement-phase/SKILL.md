@@ -35,7 +35,7 @@ Build one phase of the plan and nothing else. Headless (the prompt says to run n
 
 ## Summary format
 
-The first line must be exactly `Status: done` or `Status: blocked - <reason>`. Any other first line stops the run as blocked. Then:
+The first line must be exactly `Status: done` or `Status: blocked - <reason>`. Every final message must start this way, including a reply to a Monitor or other background event. Any other first line gets one reminder, then stops the run as blocked. Then:
 
 - **Changed** — files with `file:line` and one line each.
 - **Verified** — commands run and their outcome.

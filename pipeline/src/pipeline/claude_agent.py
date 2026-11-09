@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from pipeline.agent import AgentError, Denial, Result
@@ -21,14 +22,18 @@ class ClaudeAgent:
         self.node_bin = node_bin
         self.allowed_tools = allowed_tools
 
-    def run(self, prompt: str, model: str, budget: float) -> Result:
+    def run(self, prompt: str, model: str, budget: float, resume: Result | None = None) -> Result:
+        # Claude reports cost and budget per session, so a resumed call carries the earlier spend.
+        spent = resume.cost_usd if resume else 0.0
         command = [
             "claude", "-p", prompt,
             "--output-format", "json",
             "--model", model,
             "--max-turns", str(self.max_turns),
-            "--max-budget-usd", str(budget),
+            "--max-budget-usd", str(budget + spent),
         ]
+        if resume:
+            command += ["--resume", resume.session_id]
         if self.add_dirs:
             command += ["--add-dir", *map(str, self.add_dirs)]
         if self.allowed_tools:
@@ -43,7 +48,8 @@ class ClaudeAgent:
             raise AgentError(f"claude timed out after {self.timeout_s}s") from error
         if proc.returncode != 0:
             raise AgentError(f"claude exited {proc.returncode}: {proc.stderr.strip()}")
-        return self._parse(proc.stdout)
+        result = self._parse(proc.stdout)
+        return replace(result, cost_usd=result.cost_usd - spent)
 
     def _env(self) -> dict[str, str]:
         env = os.environ.copy()
@@ -66,4 +72,4 @@ class ClaudeAgent:
         )
         for denial in denials:
             print(f"claude was denied {denial.tool} {denial.command!r}; add a rule for it to allowedTools in .pipeline.json", file=sys.stderr)
-        return Result(text, cost, denials)
+        return Result(text, cost, denials, payload.get("session_id", ""))

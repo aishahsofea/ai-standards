@@ -127,7 +127,7 @@ After a failed review, reply on the issue to accept a finding or confirm a manua
 - Each stage has its own turn cap (10 to 60 turns) and a 30-minute timeout.
 - When a run ends, for any reason, it posts or edits one `cost` comment on the issue. The comment holds a table of stage, model and cost, plus the total and the budget. If posting fails, the table is printed to stderr.
 - A resumed run starts from the total in that comment.
-- `implement-phase-N` must start its report with `Status: done` or `Status: blocked`, and `test` and `review` with `Status: pass` or `Status: fail`. A `blocked` or `fail` status, or a first line that is none of the allowed values, stops the run and nothing is committed for that stage. The report is posted as the `<stage>.blocked` comment. `--resume` runs that stage again.
+- `implement-phase-N` must start its report with `Status: done` or `Status: blocked`, and `test` and `review` with `Status: pass` or `Status: fail`. A `blocked` or `fail` status stops the run, and nothing is committed for that stage. A first line that is none of the allowed values gets one retry: the pipeline resumes the same session and asks for the report only, and stops the run if the second reply is still wrong. The report is posted as the `<stage>.blocked` comment. `--resume` runs that stage again.
 
 ## Evals
 
