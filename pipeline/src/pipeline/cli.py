@@ -14,7 +14,7 @@ from pipeline.gates import GateError, confirm
 from pipeline.node_bin import NodeNotFound, resolve_node_bin
 from pipeline.permissions import allowed_tools, ask_approvals
 from pipeline.run_dir import RunDir, slugify
-from pipeline.stages import Pipeline
+from pipeline.stages import CI_TIMEOUT_S, Pipeline
 
 SKILLS_DIR = Path(__file__).resolve().parents[3] / "skills"
 AGENT_TIMEOUT_S = 1800
@@ -91,6 +91,7 @@ def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -
         (lambda _: True) if args.dry_run else confirm, print, forge, stop_after=getattr(args, "stop_after", None),
         ask=None if args.dry_run else input,
         approve=None if args.dry_run else approve_denials,
+        ci_timeout_s=float(os.environ.get("CI_TIMEOUT_S", CI_TIMEOUT_S)),
     )
     return pipeline, run_dir, forge, ledger
 
