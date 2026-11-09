@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.forge import FakeForge, ForgeError, GitHubForge, Issue, RunState, fetch_issue
+from pipeline.forge import Check, FakeForge, ForgeError, GitHubForge, Issue, RunState, fetch_issue
 
 
 class Shell:
@@ -282,3 +282,68 @@ def test_writes_are_not_retried(make):
     with pytest.raises(ForgeError, match="gh issue create failed"):
         forge.open_issue("Title", "Body")
     assert len(shell.ran("gh", "issue", "create")) == 1
+
+
+PR_URL = "https://github.com/o/r/pull/9"
+RUN_LINK = "https://github.com/o/r/actions/runs/5/job/1"
+
+
+def rollup(*entries):
+    return json.dumps({"headRefOid": "abc", "statusCheckRollup": list(entries)})
+
+
+def run_entry(name, status="COMPLETED", conclusion="SUCCESS", link=RUN_LINK):
+    return {"__typename": "CheckRun", "name": name, "status": status, "conclusion": conclusion, "detailsUrl": link}
+
+
+def test_ci_checks_map_check_runs_and_commit_statuses(make):
+    status = {"__typename": "StatusContext", "context": "vercel", "state": "ERROR", "targetUrl": "https://v"}
+    forge, _, state = make(
+        gh_pr_view=rollup(
+            run_entry("unit"), run_entry("lint", conclusion="FAILURE"), run_entry("e2e", "IN_PROGRESS", ""),
+            run_entry("docs", conclusion="SKIPPED"), status,
+        ),
+        **{"git_rev-parse": "abc"},
+    )
+    state.pr_url = PR_URL
+    assert [(c.name, c.state) for c in forge.ci_checks()] == [
+        ("unit", "pass"), ("lint", "fail"), ("e2e", "pending"), ("docs", "pass"), ("vercel", "fail"),
+    ]
+
+
+def test_ci_checks_wait_until_github_reports_the_local_head(make):
+    forge, _, state = make(gh_pr_view=rollup(run_entry("unit")), **{"git_rev-parse": "def"})
+    state.pr_url = PR_URL
+    assert forge.ci_checks() is None
+
+
+def test_ci_checks_without_a_pr_are_empty(make):
+    forge, shell, _ = make()
+    assert forge.ci_checks() == []
+    assert not shell.commands
+
+
+def test_ci_logs_fetch_each_run_once_and_keep_only_the_tail(make):
+    forge, shell, _ = make(gh_run_view="start-of-log" + "x" * 20_000 + "the-error")
+    failing = [Check("lint", "fail", RUN_LINK), Check("types", "fail", RUN_LINK), Check("vercel", "fail", "https://v")]
+    logs = forge.ci_logs(failing)
+    assert len(shell.ran("gh", "run", "view", "5", "--log-failed")) == 1
+    assert "the-error" in logs and "start-of-log" not in logs
+    assert "- vercel https://v" in logs
+
+
+def test_ci_logs_survive_an_unreadable_run(make):
+    forge, _, _ = make(gh_run_view=None)
+    assert "(log unavailable" in forge.ci_logs([Check("lint", "fail", RUN_LINK)])
+
+
+def test_base_failures_query_the_default_branch_check_runs(make):
+    forge, shell, _ = make(gh_repo="main", gh_api="lint\nunit")
+    assert forge.base_failures() == {"lint", "unit"}
+    assert shell.ran("gh", "api", "repos/{owner}/{repo}/commits/main/check-runs")
+
+
+def test_rerun_checks_reruns_each_failed_run_once(make):
+    forge, shell, _ = make()
+    forge.rerun_checks([Check("lint", "fail", RUN_LINK), Check("types", "fail", RUN_LINK), Check("vercel", "fail")])
+    assert shell.ran("gh", "run", "rerun", "5", "--failed") and len(shell.ran("gh", "run", "rerun")) == 1

@@ -3,7 +3,7 @@
 Takes a feature idea and produces a draft pull request. A fresh agent run handles each stage and passes work to the next through comments on the GitHub issue, so no stage depends on a long chat. You review at two points and merge yourself.
 
 ```
-idea -> issue -> analyze -> decide -> [Gate A] -> plan -> phase 1..N -> test -> review [-> fix -> test -> review] -> docs -> [Gate B]
+idea -> issue -> analyze -> decide -> [Gate A] -> plan -> phase 1..N -> test -> review [-> fix -> test -> review] -> docs -> ci [-> ci-fix -> test] -> [Gate B]
 ```
 
 ## Requirements
@@ -58,6 +58,7 @@ Before a stage runs, the pipeline copies its input comments into a temp folder o
 | fix | `fix` | sonnet | issue, plan, test report, failed review | `fix-summary` |
 | revise | `revise` | sonnet | issue, plan, test report, review, pr, earlier revisions | `revision-N` |
 | docs | `docs` | sonnet | plan, summaries, test report, review | `pr` |
+| ci-fix | `ci-fix` | sonnet | issue, plan, test report, CI failure log | `ci-fix-N` |
 
 `review` cannot edit files. It labels findings Critical, Required or Nit and starts with `Status: pass`, or `Status: fail` if any finding is Critical or Required. A fail runs one fix round: `fix` applies the Critical and Required findings, then `test` and `review` run again, with the review also reading `fix-summary`. If any of the three blocks or fails, the run stops and `docs` does not run until `--resume` passes the review. A `--resume` after a failed review starts with another fix round, not a fresh review, and the review after it reads the failed `review.blocked` so its findings carry over.
 
@@ -75,6 +76,20 @@ A failing reply is sent back once with the list of problems. If it still fails, 
 A comment over GitHub's 65,536-character limit stops the run with an error naming the artifact.
 
 `test` fails when an acceptance criterion has no covering test, or when its test still passes after `test` breaks the behavior on purpose. In a repo with Playwright, a criterion a browser can check must have a passing Playwright spec; `implement-phase` writes and runs those specs too. `test` and `review` also check the work against `DEFINITION_OF_DONE.md` in the target repo's root. Without that file they use the 8-line default in [`skills/DEFINITION_OF_DONE.md`](../skills/DEFINITION_OF_DONE.md). Unmet items appear in their reports.
+
+## CI check
+
+After `docs` and before Gate B, the run waits for the PR's CI checks on the pushed head commit. The wait is plain code; no agent runs unless a check fails.
+
+- **Green**, or no checks reported after a 2-minute grace period: continue to Gate B. The run prints which.
+- **Red**: a check that also fails on the default branch is not this branch's fault, so it is reported and skipped. For the rest, the pipeline posts the end of each failed job's log as the `ci-failure` comment and runs `ci-fix`. The skill reproduces each failure locally and labels it this branch, flaky or infrastructure, or outside its reach.
+  - `Status: done`: the fix is committed and pushed, `test` runs again, and the run waits for CI again.
+  - `Status: rerun`: every failure looks flaky, so the pipeline reruns the failed checks.
+  - `Status: blocked`: the run stops with a `ci-fix.blocked` comment.
+- After two rounds with a check still red, or if checks are still pending after `CI_TIMEOUT_S` seconds (default 1800), the run stops and posts a `ci.blocked` comment. `--resume` waits for CI again; this step never skips because a comment exists.
+- Each `ci-fix-N` summary is appended to the PR description as `## CI fixes` when you approve Gate B. `review` does not run again after a CI fix.
+
+`revise` runs the same check after its `docs` refresh. `--stop-after docs` stops before the CI check.
 
 ## Gates
 
@@ -161,7 +176,7 @@ The pipeline passes each agent the full path to its skill file, so no install is
 To use the new skills in interactive Claude Code sessions, link the ones you do not already have:
 
 ```sh
-for skill in analyze decide plan implement-phase test review fix docs; do
+for skill in analyze decide plan implement-phase test review fix ci-fix docs; do
   [ -e ~/.claude/skills/$skill ] || ln -s "$PWD/skills/$skill" ~/.claude/skills/$skill
 done
 ```
@@ -174,6 +189,7 @@ The skills are plain Markdown, so any agent can follow one if you point it at th
 - `ClaudeAgent` passes `--permission-mode auto`, so a classifier approves routine edits and commands instead of prompting. Set `PIPELINE_PERMISSION_MODE=acceptEdits` to fall back to the stricter mode, where shell commands are refused unless allowed. `git commit` and `git push` are always denied; the pipeline does those. The pipeline passes `--allowedTools` from `src/pipeline/permissions.py`: read-only `git`/`gh`/`ls`/`grep`/`cat` for every stage, plus common test, lint and build runners (pytest, npm, npx vitest/tsc/eslint/playwright, go, cargo) for the stages that write. It never allows `git commit` or `git push`; the pipeline does those. Agents run one command at a time from the repo root, so skills use `npm --prefix <dir> ...` rather than `cd <dir> && ...`.
 - A target repo adds its own commands in `.pipeline.json` at its root, for example `{"allowedTools": ["Bash(make check:*)"]}`. These apply to writing stages only. When claude is denied a command anyway, the pipeline prints the command and this fix to stderr. If the stage then ends `blocked`, the run asks in the terminal whether to allow each denied command: `y` for the rest of this run, `a` to also save the rule to `.pipeline.json`, Enter to skip. After any approval the stage reruns instead of posting the `.blocked` comment.
 - The headless shell has no nvm. The pipeline reads the target repo's `.nvmrc` (root or one folder down), picks the newest matching `~/.nvm/versions/node/v<major>.*`, and puts its `bin` first on the agent's `PATH`; it stops if that version isn't installed. Set `PIPELINE_NODE_BIN` to override.
+- The CI check reads checks once none are pending, so a workflow that registers late can be missed. A repo whose workflows skip draft PRs shows no checks until Gate B marks the PR ready; the run then prints "No CI checks reported" and the check does not run after ready.
 - Not built: automatic continuation past the gates, a GitHub Actions trigger, and a Codex adapter.
 
 ## Test

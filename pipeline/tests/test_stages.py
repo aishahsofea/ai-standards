@@ -4,7 +4,7 @@ import pytest
 
 from pipeline.agent import Denial, FakeAgent, Result
 from pipeline.cost import BudgetExceeded, CostLedger
-from pipeline.forge import FakeForge, ForgeError
+from pipeline.forge import Check, FakeForge, ForgeError
 from pipeline.run_dir import RunDir
 from pipeline.stages import ISSUE, Pipeline, phase_count, phase_stage
 
@@ -44,7 +44,25 @@ def respond(prompt):
         return "Status: done\nrevised"
     if "/fix/SKILL.md" in prompt:
         return "Status: done\nfixed"
+    if "/ci-fix/SKILL.md" in prompt:
+        return "Status: done\n- **Check** lint: fixed the import order"
     return "content"
+
+
+class Clock:
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+RUN_LINK = "https://github.com/o/r/actions/runs/5/job/1"
 
 
 class Harness:
@@ -62,7 +80,8 @@ class Harness:
         self.questions: list[str] = []
         self.shown: list[str] = []
         self.answers = answers
-        self.options = {"ask": lambda _: "sqlite", **options}
+        self.clock = Clock()
+        self.options = {"ask": lambda _: "sqlite", "sleep": self.clock.sleep, "clock": self.clock, **options}
 
     def _respond(self, prompt):
         for skill, replies in self.queued.items():
@@ -637,3 +656,99 @@ def test_revise_does_not_ask_when_there_is_no_convention_or_it_is_already_listed
     assert not any("Append it" in q for q in h.questions)
     h, _ = revise_with_convention(tmp_path / "again", True, existing=f"- {RULE}\n")
     assert not any("Append it" in q for q in h.questions)
+
+
+def test_green_ci_runs_no_agent_and_gate_b_finishes_with_the_pr_text(tmp_path):
+    h = Harness(tmp_path)
+    assert h.pipeline().run() is None
+    assert not skill_calls(h, "ci-fix")
+    assert h.forge.calls[-1] == ("finish", "content")
+    assert any("CI: no failures" in text for text in h.shown)
+
+
+def test_ci_failure_runs_ci_fix_then_retests_and_lists_the_fix_in_the_pr(tmp_path):
+    h = Harness(tmp_path)
+    h.forge.ci_results = [[Check("lint", "fail", RUN_LINK)], [Check("lint", "pass")]]
+    assert h.pipeline().run() is None
+    assert h.forge.artifacts["ci-failure"] == "log of lint"
+    fix = skill_calls(h, "ci-fix")[0]
+    assert "log of lint" in staged(fix, "ci-failure")
+    assert "fixed the import order" in h.forge.artifacts["ci-fix-1"]
+    assert len(skill_calls(h, "test")) == 2
+    commits = [c[1] for c in h.forge.calls if c[0] == "checkpoint"]
+    assert commits[-3:] == ["pipeline: docs", "pipeline: fix CI failures", "pipeline: test"]
+    body = h.forge.calls[-1][1]
+    assert body.startswith("content\n\n## CI fixes\n\n- **Check** lint: fixed the import order")
+
+
+def test_ci_fix_saying_rerun_reruns_the_checks_without_a_commit_or_retest(tmp_path):
+    h = Harness(tmp_path)
+    h.forge.ci_results = [[Check("e2e", "fail", RUN_LINK)], [Check("e2e", "pass")]]
+    h.queued["ci-fix"] = ["Status: rerun\n- **Check** e2e: runner timeout"]
+    assert h.pipeline().run() is None
+    assert ("rerun", "e2e") in h.forge.calls
+    assert len(skill_calls(h, "test")) == 1
+    assert ("checkpoint", "pipeline: fix CI failures") not in h.forge.calls
+
+
+def test_ci_still_failing_after_two_rounds_blocks_before_gate_b(tmp_path):
+    h = Harness(tmp_path)
+    h.forge.ci_results = [[Check("lint", "fail", RUN_LINK)]]
+    assert h.pipeline().run() == "ci"
+    assert len(skill_calls(h, "ci-fix")) == 2
+    assert "ci-fix-2" in h.forge.artifacts
+    assert "still failing after 2 fix rounds: lint" in h.forge.artifacts["ci.blocked"]
+    assert not any(call[0] == "finish" for call in h.forge.calls)
+
+
+def test_checks_that_also_fail_on_the_base_branch_are_not_fixed(tmp_path):
+    h = Harness(tmp_path)
+    h.forge.ci_results = [[Check("flaky-main", "fail", RUN_LINK), Check("unit", "pass")]]
+    h.forge.on_base = {"flaky-main"}
+    assert h.pipeline().run() is None
+    assert not skill_calls(h, "ci-fix")
+    assert any("flaky-main" in text and "base branch" in text for text in h.shown)
+
+
+def test_blocked_ci_fix_stops_the_run(tmp_path):
+    h = Harness(tmp_path)
+    h.forge.ci_results = [[Check("deploy", "fail", RUN_LINK)]]
+    h.queued["ci-fix"] = ["Status: blocked - needs a secret"]
+    assert h.pipeline().run() == "ci-fix"
+    assert "needs a secret" in h.forge.artifacts["ci-fix.blocked"]
+    assert not any(call[0] == "finish" for call in h.forge.calls)
+
+
+def test_ci_that_never_finishes_times_out_and_resume_waits_again(tmp_path):
+    h = Harness(tmp_path, ci_timeout_s=60)
+    h.forge.ci_results = [[Check("build", "pending")]]
+    assert h.pipeline().run() == "ci"
+    assert "did not finish within 60s" in h.forge.artifacts["ci.blocked"]
+    h.forge.ci_results = [[Check("build", "pass")]]
+    assert h.pipeline().run() is None
+
+
+def test_ci_waits_for_the_pushed_head_and_for_pending_checks(tmp_path):
+    h = Harness(tmp_path)
+    h.forge.ci_results = [None, [Check("build", "pending")], [Check("build", "pass")]]
+    assert h.pipeline().run() is None
+    assert h.clock.sleeps == [15, 15]
+
+
+def test_no_checks_are_accepted_only_after_the_grace_period(tmp_path):
+    h = Harness(tmp_path)
+    h.forge.ci_results = [[]]
+    assert h.pipeline().run() is None
+    assert sum(h.clock.sleeps) >= 120
+    assert any("No CI checks reported" in text for text in h.shown)
+
+
+def test_revise_waits_for_ci_before_asking_gate_b_again(tmp_path):
+    h = Harness(tmp_path)
+    h.pipeline().run()
+    h.agent.calls.clear()
+    h.forge.calls.clear()
+    h.forge.ci_results = [[Check("lint", "fail", RUN_LINK)], [Check("lint", "pass")]]
+    assert h.pipeline().revise("Use a modal") is None
+    assert len(skill_calls(h, "ci-fix")) == 1
+    assert h.forge.calls[-1][0] == "finish"

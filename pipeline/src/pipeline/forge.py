@@ -4,7 +4,7 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pipeline.run_dir import check_artifact
 
@@ -28,6 +28,37 @@ def run_command(command: tuple[str, ...], cwd: Path, *, retry: bool = False) -> 
         time.sleep(delay)
 
 
+CheckState = Literal["pass", "fail", "pending"]
+RUN_ID = re.compile(r"/actions/runs/(\d+)")
+PASSING = {"SUCCESS", "NEUTRAL", "SKIPPED"}
+FAILING = {"FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "CANCELLED", "STALE", "ERROR"}
+LOG_TAIL_CHARS = 10_000
+MAX_LOG_RUNS = 4
+
+
+@dataclass(frozen=True)
+class Check:
+    name: str
+    state: CheckState
+    link: str = ""
+
+    @property
+    def run_id(self) -> str | None:
+        match = RUN_ID.search(self.link)
+        return match[1] if match else None
+
+
+def check_from_rollup(entry: dict) -> Check:
+    """Reads a `statusCheckRollup` entry, either a check run or a commit status."""
+    if entry["__typename"] == "StatusContext":
+        name, result, link = entry["context"], entry["state"], entry.get("targetUrl", "")
+    else:
+        name, link = entry["name"], entry.get("detailsUrl", "")
+        result = entry["conclusion"] if entry["status"] == "COMPLETED" else "PENDING"
+    state = "pass" if result in PASSING else "fail" if result in FAILING else "pending"
+    return Check(name, state, link)
+
+
 class Forge(Protocol):
     def start_branch(self) -> None: ...
     def open_issue(self, title: str, body: str) -> None: ...
@@ -37,6 +68,10 @@ class Forge(Protocol):
     def read_artifact(self, name: str) -> str | None: ...
     def has_artifact(self, name: str) -> bool: ...
     def human_comments_after(self, name: str) -> list[str]: ...
+    def ci_checks(self) -> list[Check] | None: ...
+    def ci_logs(self, failing: list[Check]) -> str: ...
+    def base_failures(self) -> set[str]: ...
+    def rerun_checks(self, failing: list[Check]) -> None: ...
 
 
 def heading(name: str) -> str:
@@ -96,6 +131,8 @@ class FakeForge:
         self.artifacts: dict[str, str] = {}
         self.posts: list[str] = []
         self.replies: list[str] = []
+        self.ci_results: list[list[Check] | None] = [[Check("ci", "pass")]]
+        self.on_base: set[str] = set()
 
     def start_branch(self) -> None:
         self.calls.append(("start_branch",))
@@ -123,6 +160,19 @@ class FakeForge:
 
     def human_comments_after(self, name: str) -> list[str]:
         return list(self.replies)
+
+    def ci_checks(self) -> list[Check] | None:
+        return self.ci_results.pop(0) if len(self.ci_results) > 1 else self.ci_results[0]
+
+    def ci_logs(self, failing: list[Check]) -> str:
+        self.calls.append(("ci_logs", *(check.name for check in failing)))
+        return "log of " + ", ".join(check.name for check in failing)
+
+    def base_failures(self) -> set[str]:
+        return self.on_base
+
+    def rerun_checks(self, failing: list[Check]) -> None:
+        self.calls.append(("rerun", *(check.name for check in failing)))
 
 
 class GitHubForge:
@@ -201,6 +251,38 @@ class GitHubForge:
             return []
         return [c["body"] for c in comments[position + 1 :] if not self._artifact_name(c)]
 
+    def ci_checks(self) -> list[Check] | None:
+        """None until GitHub reports the local HEAD as the PR head."""
+        if not self.state.pr_url:
+            return []
+        output = self._run("gh", "pr", "view", self.state.pr_url, "--json", "headRefOid,statusCheckRollup", retry=True)
+        view = json.loads(output)
+        if view["headRefOid"] != self._run("git", "rev-parse", "HEAD"):
+            return None
+        return [check_from_rollup(entry) for entry in view["statusCheckRollup"]]
+
+    def ci_logs(self, failing: list[Check]) -> str:
+        sections = ["Failing checks:", *(f"- {check.name} {check.link}".rstrip() for check in failing)]
+        for run_id in list(dict.fromkeys(check.run_id for check in failing if check.run_id))[:MAX_LOG_RUNS]:
+            try:
+                log = self._run("gh", "run", "view", run_id, "--log-failed", retry=True)[-LOG_TAIL_CHARS:]
+            except ForgeError as error:
+                log = f"(log unavailable: {error})"
+            sections.append(f"## Run {run_id} (end of the failed-step log)\n\n{log}")
+        return "\n\n".join(sections)
+
+    def base_failures(self) -> set[str]:
+        query = '.check_runs[] | select(.conclusion == "failure") | .name'
+        endpoint = f"repos/{{owner}}/{{repo}}/commits/{self._default_branch()}/check-runs"
+        return set(self._run("gh", "api", endpoint, "--jq", query, retry=True).splitlines())
+
+    def rerun_checks(self, failing: list[Check]) -> None:
+        for run_id in dict.fromkeys(check.run_id for check in failing if check.run_id):
+            self._run("gh", "run", "rerun", run_id, "--failed")
+
+    def _default_branch(self) -> str:
+        return self._run("gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name", retry=True)
+
     def _changed_paths(self) -> set[str]:
         untracked = self._run("git", "ls-files", "-z", "--others", "--exclude-standard", "--", ".", EXCLUDE_RUNS)
         modified = self._run("git", "diff", "-z", "--name-only", "HEAD", "--", ".", EXCLUDE_RUNS)
@@ -227,10 +309,7 @@ class GitHubForge:
         return match[1] if match else None
 
     def _has_commits_to_review(self) -> bool:
-        base = self._run(
-            "gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name", retry=True
-        )
-        return int(self._run("git", "rev-list", "--count", f"origin/{base}..HEAD") or 0) > 0
+        return int(self._run("git", "rev-list", "--count", f"origin/{self._default_branch()}..HEAD") or 0) > 0
 
     def _open_draft_pr(self) -> None:
         body = f"Draft opened by the agent pipeline. Closes {self.state.issue_url}"

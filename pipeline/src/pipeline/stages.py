@@ -1,12 +1,14 @@
 import re
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
+from itertools import count
 from pathlib import Path
 from typing import Literal
 
 from pipeline.agent import Agent, Denial, Result
 from pipeline.cost import CostLedger
-from pipeline.forge import Forge, ForgeError
+from pipeline.forge import Check, Forge, ForgeError
 from pipeline.gates import GATES, PHASE_HEADING, plan_preview, read_feedback
 from pipeline.run_dir import RunDir
 from pipeline.validate import analysis_problems, decisions_problems, plan_problems, proposed_convention, reference_problems
@@ -55,6 +57,19 @@ REVISION_RECHECK_NOTE = (
 DOCS_REFRESH_NOTE = "The revise stage changed the feature after the PR text was written. Rewrite it to match the code as it is now."
 CONVENTIONS_FILE = "UX_CONVENTIONS.md"
 REPLY_INPUTS = ("decisions", "review.blocked")
+CI_FIX_NOTE = "The CI checks failed on the pull request; the failure log is in ci-failure.md. Fix only what the logs show."
+CI_RECHECK_NOTE = "The ci-fix stage changed the code after CI failed. Check the code as it is now."
+MAX_CI_ROUNDS = 2
+CI_POLL_S = 15
+CI_GRACE_S = 120
+CI_TIMEOUT_S = 1800
+
+
+def ci_summary(checks: list[Check], on_base: set[str]) -> str:
+    if not checks:
+        return "No CI checks reported for this PR."
+    summary = f"CI: no failures caused by this branch ({len(checks)} checks)."
+    return f"{summary} Also failing on the base branch, so not fixed: {', '.join(sorted(on_base))}." if on_base else summary
 
 
 def phase_count(plan: str) -> int:
@@ -112,6 +127,13 @@ def closing_stages(phases: int) -> tuple[Stage, Stage, Stage]:
     )
 
 
+def ci_fix_stage(number: int) -> Stage:
+    return Stage(
+        "ci-fix", "ci-fix", ("issue", "plan", "test-report", "ci-failure"), f"ci-fix-{number}", "sonnet", 40,
+        "Diagnose and fix the failing CI checks.", ("done", "rerun", "blocked"), "pipeline: fix CI failures",
+    )
+
+
 def revise_stage(number: int, inputs: tuple[str, ...]) -> Stage:
     return Stage(
         "revise", "revise", inputs, f"revision-{number}", "sonnet", 60,
@@ -133,6 +155,9 @@ class Pipeline:
     pause_each: bool = True
     ask: Callable[[str], str] | None = None
     approve: Callable[[tuple[Denial, ...]], bool] | None = None
+    sleep: Callable[[float], None] = time.sleep
+    clock: Callable[[], float] = time.monotonic
+    ci_timeout_s: float = CI_TIMEOUT_S
 
     def run(self) -> str | None:
         """Runs stages in order; returns the stage it stopped at, or None when finished."""
@@ -148,6 +173,8 @@ class Pipeline:
                 self.forge.checkpoint(stage.commit or f"pipeline: {stage.name}")
             if outcome == "blocked" or stage.name == self.stop_after:
                 return stage.name
+            if stage.name == "docs" and (stopped := self._ci_round(stages["test"])):
+                return stopped
             if not self._proceed(stage, outcome == "done"):
                 return stage.name
         return None
@@ -230,6 +257,8 @@ class Pipeline:
             if step is stage:
                 self._offer_convention(self._artifact(stage.output))
             self.forge.checkpoint(step.commit or f"pipeline: {step.name}")
+        if stopped := self._ci_round(test):
+            return stopped
         return None if self._proceed(docs, True) else docs.name
 
     def _offer_convention(self, revision: str) -> None:
@@ -254,6 +283,59 @@ class Pipeline:
             if stage is not review:
                 self.forge.checkpoint(stage.commit or f"pipeline: {stage.name}")
         return None
+
+    def _ci_round(self, test: Stage) -> str | None:
+        """Waits for the PR's checks and fixes failures; returns the stage it stopped at, or None when CI is green or absent."""
+        for attempt in range(MAX_CI_ROUNDS + 1):
+            self.show("waiting for CI checks")
+            checks = self._wait_for_ci()
+            if checks is None:
+                return self._ci_blocked(f"checks did not finish within {self.ci_timeout_s:.0f}s")
+            failing = [check for check in checks if check.state == "fail"]
+            on_base = {check.name for check in failing} & self.forge.base_failures() if failing else set()
+            failing = [check for check in failing if check.name not in on_base]
+            if not failing:
+                self.show(ci_summary(checks, on_base))
+                return None
+            names = ", ".join(check.name for check in failing)
+            if attempt == MAX_CI_ROUNDS:
+                return self._ci_blocked(f"still failing after {MAX_CI_ROUNDS} fix rounds: {names}")
+            self.show(f"CI failed: {names}")
+            self.forge.post_artifact("ci-failure", self.forge.ci_logs(failing))
+            fix = ci_fix_stage(next(n for n in count(1) if not self.forge.has_artifact(f"ci-fix-{n}")))
+            if self._execute(fix, CI_FIX_NOTE) == "blocked":
+                return fix.name
+            if (status := STATUS.match(self._artifact(fix.output))) and status[1].lower() == "rerun":
+                self.forge.rerun_checks(failing)
+                continue
+            self.forge.checkpoint(fix.commit)
+            if self._execute(test, CI_RECHECK_NOTE) == "blocked":
+                return test.name
+            self.forge.checkpoint(f"pipeline: {test.name}")
+        return None
+
+    def _wait_for_ci(self) -> list[Check] | None:
+        """Polls until no check is pending; None on timeout. Zero checks counts only after a grace period."""
+        start = self.clock()
+        while (elapsed := self.clock() - start) < self.ci_timeout_s:
+            checks = self.forge.ci_checks()
+            if checks is not None and all(check.state != "pending" for check in checks) and (checks or elapsed >= CI_GRACE_S):
+                return checks
+            self.sleep(CI_POLL_S)
+        return None
+
+    def _ci_blocked(self, report: str) -> str:
+        self.show(f"CI check stopped; report posted as the 'ci.blocked' comment on the issue:\n{report}")
+        self.forge.post_artifact("ci.blocked", report)
+        return "ci"
+
+    def _ci_fixes(self) -> str:
+        summaries = []
+        for n in count(1):
+            if not self.forge.has_artifact(name := f"ci-fix-{n}"):
+                break
+            summaries.append(self._artifact(name).partition("\n")[2].strip())
+        return "\n\n## CI fixes\n\n" + "\n\n".join(summaries) if summaries else ""
 
     def _review_failed_earlier(self, stage: Stage) -> bool:
         """A resumed run sends an earlier failed review to the fix round instead of reviewing afresh."""
@@ -307,7 +389,7 @@ class Pipeline:
                 self.show(f"{len(open_items)} escalated question(s) still have no answer; answer them, then --resume.")
                 return False
             if approved and gate.publishes:
-                self.forge.finish(self._artifact(gate.artifact))
+                self.forge.finish(self._artifact(gate.artifact) + self._ci_fixes())
             return approved
         if not (ran and self.pause_each):
             return True
