@@ -26,10 +26,11 @@ class Result:
     text: str
     cost_usd: float
     denials: tuple[Denial, ...] = ()
+    session_id: str = ""
 
 
 class Agent(Protocol):
-    def run(self, prompt: str, model: str, budget: float) -> Result: ...
+    def run(self, prompt: str, model: str, budget: float, resume: Result | None = None) -> Result: ...
 
 
 class FakeAgent:
@@ -37,7 +38,11 @@ class FakeAgent:
         self.respond = respond
         self.cost_usd = cost_usd
         self.calls: list[tuple[str, str, float]] = []
+        self.resumes: list[tuple[str, str]] = []
 
-    def run(self, prompt: str, model: str, budget: float) -> Result:
+    def run(self, prompt: str, model: str, budget: float, resume: Result | None = None) -> Result:
         self.calls.append((prompt, model, budget))
-        return Result(self.respond(prompt), self.cost_usd)
+        if resume:
+            self.resumes.append((prompt, resume.session_id))
+        session_id = resume.session_id if resume else f"fake-{len(self.calls)}"
+        return Result(self.respond(prompt), self.cost_usd, session_id=session_id)

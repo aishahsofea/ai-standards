@@ -96,6 +96,7 @@ def retry_prompt(prompt: str, reply: str, problems: list[str]) -> str:
     return f"{prompt}\n\nYour previous reply failed these checks:\n{bullets(problems)}\nFix them and reply with the complete document.\n\nPrevious reply:\n{reply}"
 
 
+STATUS_RETRY = "Reply with your report only. The first line must be `Status: {allowed}`."
 REVISIT_NOTE = (
     "A human answered the escalated questions in the decisions file. Revise only the decisions their "
     "answers change, keep every answer verbatim, and remove each '[revisit]' marker."
@@ -218,7 +219,7 @@ class Pipeline:
         if not note and self.forge.has_artifact(stage.output):
             return "skipped"
         prompt = self.build_prompt(stage, note)
-        result = self._run(stage, prompt)
+        result = self._with_status(stage, prompt, self._run(stage, prompt))
         report = self._blocked_report(stage, result.text)
         if not report and (problems := self._problems(stage, result.text)):
             result = self._run(stage, retry_prompt(prompt, result.text, problems))
@@ -344,11 +345,23 @@ class Pipeline:
         report = self.forge.read_artifact("review.blocked")
         return report is not None and (match := STATUS.match(report)) is not None and match[1].lower() == "fail"
 
-    def _run(self, stage: Stage, prompt: str) -> Result:
+    def _run(self, stage: Stage, prompt: str, resume: Result | None = None) -> Result:
         self.ledger.check()
-        result = self.agent_for(stage).run(prompt, stage.model, self.ledger.budget_usd - self.ledger.total())
+        result = self.agent_for(stage).run(prompt, stage.model, self.ledger.budget_usd - self.ledger.total(), resume=resume)
         self.ledger.record(stage.name, stage.model, result.cost_usd)
         return result
+
+    def _with_status(self, stage: Stage, prompt: str, result: Result) -> Result:
+        """Asks once more when the reply's first-line status is missing or not allowed for the stage."""
+        status = STATUS.match(result.text)
+        if not stage.statuses or (status and status[1].lower() in stage.statuses):
+            return result
+        allowed = "|".join(stage.statuses)
+        if result.session_id:
+            retry = self._run(stage, STATUS_RETRY.format(allowed=allowed), resume=result)
+        else:
+            retry = self._run(stage, retry_prompt(prompt, result.text, [f"the first line must be `Status: {allowed}`"]))
+        return replace(retry, denials=(*result.denials, *retry.denials))
 
     def _problems(self, stage: Stage, text: str) -> list[str]:
         if stage.name == ANALYZE.name:

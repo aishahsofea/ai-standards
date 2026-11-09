@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,8 @@ class Harness:
         self.plan = None
         self.review_reply = None
         self.queued: dict[str, list[str]] = {}
+        self.follow_ups: list[str] = []
+        self.last = ""
         self.agent = FakeAgent(self._respond, cost_usd=cost)
         self.forge = FakeForge()
         self.questions: list[str] = []
@@ -84,6 +87,12 @@ class Harness:
         self.options = {"ask": lambda _: "sqlite", "sleep": self.clock.sleep, "clock": self.clock, **options}
 
     def _respond(self, prompt):
+        if prompt.startswith("Reply with your report only"):
+            return self.follow_ups.pop(0) if self.follow_ups else self.last
+        self.last = self._reply(prompt)
+        return self.last
+
+    def _reply(self, prompt):
         for skill, replies in self.queued.items():
             if replies and f"/{skill}/SKILL.md" in prompt:
                 return replies.pop(0)
@@ -419,8 +428,8 @@ class DenyingAgent(FakeAgent):
         super().__init__(respond)
         self.denied_once = False
 
-    def run(self, prompt, model, budget):
-        result = super().run(prompt, model, budget)
+    def run(self, prompt, model, budget, resume=None):
+        result = super().run(prompt, model, budget, resume)
         if "Implement only phase 2" in prompt and not self.denied_once:
             self.denied_once = True
             return Result(result.text, 0.0, (Denial("Bash", "docker ps"),))
@@ -462,6 +471,77 @@ def test_missing_or_invalid_status_blocks_phase(tmp_path, reply):
     assert reply in h.forge.artifacts["implement-phase-1.blocked"]
     assert "Status: done|blocked" in h.forge.artifacts["implement-phase-1.blocked"]
     assert not h.forge.has_artifact("phase-1-summary")
+
+
+MONITOR_REPLY = "Monitor event matches the results already in the summary above."
+
+
+def full_phase_1_calls(h):
+    return sum("Implement only phase 1" in call[0] for call in h.agent.calls)
+
+
+def test_phase_with_no_status_line_resumes_the_session_for_a_report(tmp_path):
+    h = Harness(tmp_path)
+    h.phase_1_reply = MONITOR_REPLY
+    h.follow_ups = ["Status: done\nthe summary"]
+    assert h.pipeline().run() is None
+    assert h.forge.artifacts["phase-1-summary"] == "Status: done\nthe summary"
+    assert full_phase_1_calls(h) == 1
+    assert [prompt for prompt, _ in h.agent.resumes] == ["Reply with your report only. The first line must be `Status: done|blocked`."]
+    assert [record[0] for record in h.ledger.records].count("implement-phase-1") == 2
+
+
+def test_phase_still_blocks_when_the_resumed_reply_has_no_status(tmp_path):
+    h = Harness(tmp_path)
+    h.phase_1_reply = MONITOR_REPLY
+    h.follow_ups = ["still nothing"]
+    assert h.pipeline().run() == "implement-phase-1"
+    assert h.forge.artifacts["implement-phase-1.blocked"] == (
+        "Status: blocked - reply must start with `Status: done|blocked`\n\nstill nothing"
+    )
+    assert len(h.agent.resumes) == 1
+
+
+def test_status_retry_is_billed_against_the_remaining_budget(tmp_path):
+    h = Harness(tmp_path)
+    h.phase_1_reply = MONITOR_REPLY
+    h.pipeline().run()
+    assert h.agent.calls[-1][2] == 15.0 - 2.5
+
+
+def test_status_retry_stops_when_the_first_reply_used_up_the_budget(tmp_path):
+    h = Harness(tmp_path, budget=2.2)
+    h.phase_1_reply = MONITOR_REPLY
+    with pytest.raises(BudgetExceeded):
+        h.pipeline().run()
+    assert h.agent.resumes == []
+
+
+def test_status_retry_without_a_session_id_reruns_with_the_previous_reply(tmp_path):
+    class NoSession(FakeAgent):
+        def run(self, prompt, model, budget, resume=None):
+            return replace(super().run(prompt, model, budget, resume), session_id="")
+
+    h = Harness(tmp_path)
+    h.agent = NoSession(h._respond, cost_usd=0.5)
+    h.phase_1_reply = MONITOR_REPLY
+    assert h.pipeline().run() == "implement-phase-1"
+    retry = h.agent.calls[-1][0]
+    assert "Implement only phase 1" in retry and f"Previous reply:\n{MONITOR_REPLY}" in retry
+    assert h.agent.resumes == []
+
+
+def test_an_explicit_blocked_status_is_not_retried(tmp_path):
+    h = Harness(tmp_path)
+    h.block_phase_2 = True
+    h.pipeline().run()
+    assert h.agent.resumes == []
+
+
+def test_stages_without_a_status_list_are_not_retried(tmp_path):
+    h = Harness(tmp_path)
+    h.pipeline().run()
+    assert h.agent.resumes == []
 
 
 def test_rerunning_a_blocked_stage_edits_the_same_comment(tmp_path):
