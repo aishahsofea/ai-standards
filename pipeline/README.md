@@ -37,8 +37,9 @@ pipeline run "Add a dark mode toggle" --dry-run
 | `--dry-run` | Use a fake agent and fake GitHub in a temp directory. Nothing is spent or pushed. |
 | `--repo PATH` | Target repository. Default: current directory. |
 | `--stop-after STAGE` | Stop once that stage finishes, for example `plan`. |
+| `--step` | Ask `y/N` after every stage, not only at the gates and after `plan`. |
 
-The run asks `y/N` after every stage. At the two gates it also shows what you must review. After `plan` it shows the phase titles, `## Assumptions` and `## Out of scope` first, so you can decline before any code is written.
+The run asks `y/N` three times: at the two gates and after `plan`. At the gates it shows what you must review. After `plan` it shows the phase titles, `## Assumptions` and `## Out of scope`, so you can decline before any code is written. Each prompt, and a run that stops, rings the terminal bell and on macOS shows a notification.
 
 ## Stages and comments
 

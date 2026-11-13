@@ -1,5 +1,7 @@
 import argparse
+import json
 import os
+import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
@@ -34,6 +36,13 @@ def dry_run_text(prompt: str) -> str:
     return "# dry run\n"
 
 
+def notify(message: str) -> None:
+    print("\a", end="", flush=True)
+    if sys.platform == "darwin":
+        script = f'display notification {json.dumps(message)} with title "pipeline"'
+        subprocess.run(("osascript", "-e", script), capture_output=True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pipeline")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -47,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true", help="use a fake agent and forge in a temp repo")
     run.add_argument("--repo", type=Path, default=Path.cwd(), help="target repo (default: current directory)")
     run.add_argument("--stop-after", metavar="STAGE", help="stop once this stage finishes")
+    run.add_argument("--step", action="store_true", help="ask y/N after every stage, not only at the gates and the plan")
     revise = commands.add_parser("revise", help="apply your feedback to a finished run's branch")
     revise.add_argument("slug", help="the run to revise")
     revise.add_argument("feedback", help="what should change")
@@ -89,14 +99,16 @@ def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -
     pipeline = Pipeline(
         run_dir, ledger, agent_for, SKILLS_DIR, state.idea,
         (lambda _: True) if args.dry_run else confirm, print, forge, stop_after=getattr(args, "stop_after", None),
+        pause_each=getattr(args, "step", False),
         ask=None if args.dry_run else input,
+        notify=(lambda _: None) if args.dry_run else notify,
         approve=None if args.dry_run else approve_denials,
         ci_timeout_s=float(os.environ.get("CI_TIMEOUT_S", CI_TIMEOUT_S)),
     )
     return pipeline, run_dir, forge, ledger
 
 
-def finish_run(pipeline_run: Callable[[], str | None], run_dir: RunDir, forge: Forge, ledger: CostLedger, slug: str) -> int:
+def finish_run(pipeline: Pipeline, pipeline_run: Callable[[], str | None], run_dir: RunDir, forge: Forge, ledger: CostLedger, slug: str) -> int:
     try:
         stopped = pipeline_run()
     finally:
@@ -107,6 +119,7 @@ def finish_run(pipeline_run: Callable[[], str | None], run_dir: RunDir, forge: F
         print(f"Finished; {spent}")
     else:
         print(f"Stopped at '{stopped}'; {spent}. Resume with: pipeline run --resume {slug}")
+        pipeline.notify(f"{slug} stopped at {stopped}")
     return 0
 
 
@@ -122,7 +135,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     else:
         state = RunState(issue.title, issue.url) if issue else RunState(args.idea)
     pipeline, run_dir, forge, ledger = open_run(args, repo, slug, state)
-    return finish_run(pipeline.run, run_dir, forge, ledger, slug)
+    return finish_run(pipeline, pipeline.run, run_dir, forge, ledger, slug)
 
 
 def revise_pipeline(args: argparse.Namespace) -> int:
@@ -131,7 +144,7 @@ def revise_pipeline(args: argparse.Namespace) -> int:
     if not state_path.exists():
         raise ForgeError(f"no run '{args.slug}' in {repo}")
     pipeline, run_dir, forge, ledger = open_run(args, repo, args.slug, RunState.load(state_path))
-    return finish_run(lambda: pipeline.revise(args.feedback), run_dir, forge, ledger, args.slug)
+    return finish_run(pipeline, lambda: pipeline.revise(args.feedback), run_dir, forge, ledger, args.slug)
 
 
 def run_eval(args: argparse.Namespace) -> int:

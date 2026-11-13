@@ -153,9 +153,10 @@ class Pipeline:
     show: Callable[[str], None]
     forge: Forge
     stop_after: str | None = None
-    pause_each: bool = True
+    pause_each: bool = False
     ask: Callable[[str], str] | None = None
     approve: Callable[[tuple[Denial, ...]], bool] | None = None
+    notify: Callable[[str], None] = lambda _: None
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
     ci_timeout_s: float = CI_TIMEOUT_S
@@ -389,6 +390,7 @@ class Pipeline:
             if not ran and not gate.needs_input(artifact):
                 return True
             self.show(gate.preview(artifact))
+            self.notify(f"{stage.name} is waiting for your review")
             if self.ask and gate.answer and (updated := gate.answer(artifact, self.ask)) != artifact:
                 self.forge.post_artifact(gate.artifact, updated)
                 if gate.needs_rerun(updated):
@@ -404,8 +406,11 @@ class Pipeline:
             if approved and gate.publishes:
                 self.forge.finish(self._artifact(gate.artifact) + self._ci_fixes())
             return approved
-        if not (ran and self.pause_each):
+        if not ran:
             return True
         if stage.name == PLAN.name:
             self.show(plan_preview(self._artifact(PLAN.output)))
+            self.notify("plan is waiting for your review")
+        elif not self.pause_each:
+            return True
         return self.confirm(f"{stage.name} done. Continue?")

@@ -38,6 +38,7 @@ def fake_github(tmp_path, monkeypatch):
     forge = FakeForge()
     monkeypatch.setattr(cli, "GitHubForge", lambda *args: forge)
     monkeypatch.setattr(cli, "confirm", lambda _: True)
+    monkeypatch.setattr(cli, "notify", lambda _: None)
     return forge
 
 
@@ -76,7 +77,7 @@ def test_cost_comment_posted_when_stopped_at_a_gate(tmp_path, monkeypatch, fake_
     use_agent(monkeypatch, FakeAgent(cli.dry_run_text, cost_usd=0.5))
     monkeypatch.setattr(cli, "confirm", lambda _: False)
     run_in(tmp_path)
-    assert "Total: $0.5000" in fake_github.artifacts["cost"]
+    assert "Total: $1.5000" in fake_github.artifacts["cost"]
 
 
 def test_cost_comment_posted_when_a_stage_is_blocked(tmp_path, monkeypatch, fake_github, capsys):
