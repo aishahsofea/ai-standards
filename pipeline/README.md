@@ -41,6 +41,21 @@ pipeline run "Add a dark mode toggle" --dry-run
 
 The run asks `y/N` three times: at the two gates and after `plan`. At the gates it shows what you must review. After `plan` it shows the phase titles, `## Assumptions` and `## Out of scope`, so you can decline before any code is written. Each prompt, and a run that stops, rings the terminal bell and on macOS shows a notification.
 
+## Preflight
+
+List the target repo's check commands in `.pipeline.json` at its root:
+
+```json
+{"checks": ["npm --prefix frontend test", "npm --prefix frontend run lint", "python3 -m pytest -q"]}
+```
+
+On a new run the pipeline runs them itself after the issue stage, before any agent reads code. Each is one command with no shell features (no `cd`, pipes or `&&`), run from the repo root with the same Node as the agents.
+
+- **All pass**: the run posts a `baseline` comment and continues.
+- **Any fail**: the run shows each failing command with the end of its output and asks once whether to continue. `N` stops the run before `analyze`. `y` posts the failures in the `baseline` comment; `implement-phase`, `test`, `fix`, `ci-fix` and `revise` read it and do not block on a failure listed there.
+
+This catches a repo whose checks cannot run (wrong Node, missing database, bad import path) and tests already failing on the base branch. Without `checks` the step is skipped. A resumed run never repeats it.
+
 ## Stages and comments
 
 Each stage's output is one comment on the issue. A comment starts with a hidden marker (`<!-- pipeline:artifact=<name> -->`) and a `## <Name>` heading, then the agent's text. The issue body is the issue stage's output. Nothing under `.agent/runs/` is committed, so the PR diff holds only real changes.

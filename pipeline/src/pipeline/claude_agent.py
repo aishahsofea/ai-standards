@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from pipeline.agent import AgentError, Denial, Result
+from pipeline.node_bin import env_with_node
 
 
 EDIT_TOOLS = ("Edit", "Write", "NotebookEdit")
@@ -42,7 +43,7 @@ class ClaudeAgent:
         command += ["--permission-mode", os.environ.get("PIPELINE_PERMISSION_MODE", "auto"), "--disallowedTools", ",".join(denied)]
         try:
             proc = subprocess.run(
-                command, cwd=self.cwd, capture_output=True, text=True, timeout=self.timeout_s, env=self._env()
+                command, cwd=self.cwd, capture_output=True, text=True, timeout=self.timeout_s, env=env_with_node(self.node_bin)
             )
         except subprocess.TimeoutExpired as error:
             raise AgentError(f"claude timed out after {self.timeout_s}s") from error
@@ -50,12 +51,6 @@ class ClaudeAgent:
             raise AgentError(f"claude exited {proc.returncode}: {proc.stderr.strip()}")
         result = self._parse(proc.stdout)
         return replace(result, cost_usd=result.cost_usd - spent)
-
-    def _env(self) -> dict[str, str]:
-        env = os.environ.copy()
-        if self.node_bin:
-            env["PATH"] = f"{self.node_bin}{os.pathsep}{env['PATH']}"
-        return env
 
     @staticmethod
     def _parse(stdout: str) -> Result:

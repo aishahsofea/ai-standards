@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from pipeline.agent import Agent, Denial, Result
+from pipeline.checks import CheckRun, baseline_report
 from pipeline.cost import CostLedger
 from pipeline.forge import Check, Forge, ForgeError
 from pipeline.gates import GATES, PHASE_HEADING, plan_preview, read_feedback
@@ -60,6 +61,9 @@ REPLY_INPUTS = ("decisions", "review.blocked")
 CI_FIX_NOTE = "The CI checks failed on the pull request; the failure log is in ci-failure.md. Fix only what the logs show."
 CI_RECHECK_NOTE = "The ci-fix stage changed the code after CI failed. Check the code as it is now."
 MAX_CI_ROUNDS = 2
+BASELINE = "baseline"
+PREFLIGHT = "preflight"
+BASELINE_QUESTION = "These checks fail before any change. Continue and treat them as known failures?"
 CI_POLL_S = 15
 CI_GRACE_S = 120
 CI_TIMEOUT_S = 1800
@@ -157,6 +161,7 @@ class Pipeline:
     ask: Callable[[str], str] | None = None
     approve: Callable[[tuple[Denial, ...]], bool] | None = None
     notify: Callable[[str], None] = lambda _: None
+    checks: Callable[[], list[CheckRun]] | None = None
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
     ci_timeout_s: float = CI_TIMEOUT_S
@@ -166,6 +171,8 @@ class Pipeline:
         stages: dict[str, Stage] = {}
         for stage in self._stages():
             stages[stage.name] = stage
+            if stage.name == ANALYZE.name and not self._preflight():
+                return PREFLIGHT
             outcome = "blocked" if self._review_failed_earlier(stage) else self._execute(stage)
             if outcome == "blocked" and stage.name == "review":
                 if stopped := self._fix_round(stages["test"], stage):
@@ -187,8 +194,8 @@ class Pipeline:
             "Run non-interactively; do not ask questions.",
             f"Idea: {self.idea}",
         ]
-        if stage.inputs:
-            paths = self.run_dir.stage_inputs({name: self._input(stage, name) for name in stage.inputs})
+        if inputs := self._inputs(stage):
+            paths = self.run_dir.stage_inputs({name: self._input(stage, name) for name in inputs})
             parts.append("Input files:\n" + "\n".join(f"- {path}" for path in paths))
         if stage.instruction:
             parts.append(stage.instruction)
@@ -197,6 +204,26 @@ class Pipeline:
         target = "issue body" if stage.output == "issue" else f"{stage.output} comment"
         parts.append(f"Your final reply is posted as the {target}; make it the complete document.")
         return "\n".join(parts)
+
+    def _inputs(self, stage: Stage) -> tuple[str, ...]:
+        """Stages that run the repo's checks also read the baseline, when the preflight posted one."""
+        runs_checks = stage.statuses and not stage.read_only
+        return (*stage.inputs, BASELINE) if runs_checks and self.forge.has_artifact(BASELINE) else stage.inputs
+
+    def _preflight(self) -> bool:
+        """Runs the repo's checks before the first change; False when the owner declines to go on past failures."""
+        if not self.checks or self.forge.has_artifact(BASELINE) or self.forge.has_artifact(ANALYZE.output):
+            return True
+        self.show("preflight: running the repo's checks before any change")
+        runs = self.checks()
+        report = baseline_report(runs)
+        self.show(report)
+        if not all(run.ok for run in runs):
+            self.notify("preflight found failing checks")
+            if not self.confirm(BASELINE_QUESTION):
+                return False
+        self.forge.post_artifact(BASELINE, report)
+        return True
 
     def _artifact(self, name: str) -> str:
         text = self.forge.read_artifact(name)

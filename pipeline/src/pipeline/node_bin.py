@@ -4,6 +4,13 @@ from pathlib import Path
 NVM_NODE_DIR = Path.home() / ".nvm" / "versions" / "node"
 
 
+def env_with_node(node_bin: Path | None) -> dict[str, str]:
+    env = os.environ.copy()
+    if node_bin:
+        env["PATH"] = f"{node_bin}{os.pathsep}{env['PATH']}"
+    return env
+
+
 class NodeNotFound(Exception):
     pass
 

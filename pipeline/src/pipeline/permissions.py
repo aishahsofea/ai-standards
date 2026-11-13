@@ -27,11 +27,19 @@ def with_rtk(tools: tuple[str, ...]) -> tuple[str, ...]:
     return tools + tuple(tool.replace("Bash(", "Bash(rtk ", 1) for tool in tools if tool.startswith("Bash("))
 
 
-def repo_tools(repo: Path) -> tuple[str, ...]:
+def repo_setting(repo: Path, key: str) -> tuple[str, ...]:
     config = repo / CONFIG_FILE
     if not config.exists():
         return ()
-    return tuple(json.loads(config.read_text()).get("allowedTools", ()))
+    return tuple(json.loads(config.read_text()).get(key, ()))
+
+
+def repo_tools(repo: Path) -> tuple[str, ...]:
+    return repo_setting(repo, "allowedTools")
+
+
+def repo_checks(repo: Path) -> tuple[str, ...]:
+    return repo_setting(repo, "checks")
 
 
 def allowed_tools(repo: Path, read_only: bool) -> tuple[str, ...]:

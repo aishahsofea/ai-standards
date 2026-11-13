@@ -25,6 +25,7 @@ Verify the finished feature end to end. Headless (the prompt says to run non-int
 
 - Never weaken, skip, or delete a test to make it pass.
 - Do not commit, push, or add features.
+- A failure shown in `baseline.md`, when that file is among the inputs, was there before this branch. Report it as pre-existing; it does not make the status `fail`.
 - Report honestly: failures, skipped checks, and anything you could not run.
 - Checks that need a human eye are manual checks, not passes. A check Playwright could run is never a manual check when the repo has Playwright.
 
@@ -42,7 +43,7 @@ Verify the finished feature end to end. Headless (the prompt says to run non-int
 
 ## Report format
 
-The first line must be exactly `Status: pass` or `Status: fail`. Use `fail` if any command fails or any acceptance criterion is `Not covered`. In a repo with Playwright, a criterion a browser can check that you left as a Manual check counts as `Not covered`. Any other first line stops the run as blocked. Then:
+The first line must be exactly `Status: pass` or `Status: fail`. Use `fail` if any command fails for a reason not in `baseline.md`, or any acceptance criterion is `Not covered`. In a repo with Playwright, a criterion a browser can check that you left as a Manual check counts as `Not covered`. Any other first line stops the run as blocked. Then:
 
 - **Commands** — each command with pass or fail.
 - **Acceptance criteria** — each criterion with its covering test and the edit that made it fail, `Manual check`, or `Not covered`.
