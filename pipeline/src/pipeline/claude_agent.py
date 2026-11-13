@@ -14,7 +14,7 @@ GIT_WRITES = ("Bash(git commit:*)", "Bash(git push:*)")
 
 
 class ClaudeAgent:
-    def __init__(self, cwd: Path, max_turns: int, timeout_s: float, read_only: bool = False, add_dirs: tuple[Path, ...] = (), node_bin: Path | None = None, allowed_tools: tuple[str, ...] = ()) -> None:
+    def __init__(self, cwd: Path, max_turns: int, timeout_s: float, read_only: bool = False, add_dirs: tuple[Path, ...] = (), node_bin: Path | None = None, allowed_tools: tuple[str, ...] = (), env: dict[str, str] | None = None) -> None:
         self.cwd = cwd
         self.max_turns = max_turns
         self.timeout_s = timeout_s
@@ -22,6 +22,7 @@ class ClaudeAgent:
         self.add_dirs = add_dirs
         self.node_bin = node_bin
         self.allowed_tools = allowed_tools
+        self.env = env or {}
 
     def run(self, prompt: str, model: str, budget: float, resume: Result | None = None) -> Result:
         # Claude reports cost and budget per session, so a resumed call carries the earlier spend.
@@ -43,7 +44,7 @@ class ClaudeAgent:
         command += ["--permission-mode", os.environ.get("PIPELINE_PERMISSION_MODE", "auto"), "--disallowedTools", ",".join(denied)]
         try:
             proc = subprocess.run(
-                command, cwd=self.cwd, capture_output=True, text=True, timeout=self.timeout_s, env=env_with_node(self.node_bin)
+                command, cwd=self.cwd, capture_output=True, text=True, timeout=self.timeout_s, env=env_with_node(self.node_bin) | self.env
             )
         except subprocess.TimeoutExpired as error:
             raise AgentError(f"claude timed out after {self.timeout_s}s") from error

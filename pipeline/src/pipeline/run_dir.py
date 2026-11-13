@@ -40,6 +40,15 @@ class RunDir:
         return self.path / "state.json"
 
     @property
+    def evidence(self) -> Path:
+        path = self.path / "evidence"
+        path.mkdir(exist_ok=True)
+        return path
+
+    def screenshots(self) -> list[Path]:
+        return sorted(self.evidence.glob("*.png"))
+
+    @property
     def staging(self) -> Path:
         if self._staging is None:
             self._staging = Path(tempfile.mkdtemp(prefix="pipeline-inputs-"))

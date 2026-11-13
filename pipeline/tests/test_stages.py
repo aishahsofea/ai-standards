@@ -387,6 +387,21 @@ def test_gate_b_finishes_with_the_latest_pr_comment(tmp_path):
     assert h.forge.calls[-1] == ("finish", "edited on GitHub")
 
 
+def test_gate_b_lists_the_screenshots_the_test_stage_saved(tmp_path):
+    h = Harness(tmp_path)
+    (h.run_dir.evidence / "delete-confirm-mobile.png").write_bytes(b"png")
+    h.pipeline().run()
+    listing = next(text for text in h.shown if text.startswith("Screenshots to review:"))
+    assert str(h.run_dir.evidence / "delete-confirm-mobile.png") in listing
+    assert h.shown.index(listing) == h.shown.index("content") + 1
+
+
+def test_gate_b_shows_no_screenshot_list_when_there_are_none(tmp_path):
+    h = Harness(tmp_path)
+    h.pipeline().run()
+    assert not [text for text in h.shown if text.startswith("Screenshots")]
+
+
 def test_gate_a_picks_up_an_edited_decisions_comment_and_later_replies(tmp_path):
     def answer(question):
         if "Escalated" in question:

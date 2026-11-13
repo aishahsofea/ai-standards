@@ -23,6 +23,7 @@ from pipeline.worktree import create_worktree
 
 SKILLS_DIR = Path(__file__).resolve().parents[3] / "skills"
 AGENT_TIMEOUT_S = 1800
+EVIDENCE_ENV = "PIPELINE_EVIDENCE_DIR"
 
 
 def dry_run_text(prompt: str) -> str:
@@ -106,7 +107,7 @@ def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -
 
     agent_for = (
         (lambda stage: fake_agent) if args.dry_run
-        else (lambda stage: ClaudeAgent(work, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging), node_bin, (*allowed_tools(repo, stage.read_only), *approved)))
+        else (lambda stage: ClaudeAgent(work, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging), node_bin, (*allowed_tools(repo, stage.read_only), *approved), {EVIDENCE_ENV: str(run_dir.evidence)}))
     )
     commands = () if args.dry_run else repo_checks(repo)
     if not (commands or args.dry_run):
