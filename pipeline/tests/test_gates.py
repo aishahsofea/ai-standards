@@ -62,6 +62,11 @@ def test_plan_preview_lists_titles_assumptions_and_out_of_scope():
     assert "Verify" not in preview
 
 
+def test_plan_preview_puts_prerequisites_first():
+    preview = plan_preview("## Prerequisites\n- Phase 2: a captured fixture\n## Phase 1: A\n")
+    assert preview.startswith("## Prerequisites\n- Phase 2: a captured fixture")
+
+
 def test_plan_preview_omits_missing_sections():
     assert "Assumptions" not in plan_preview("## Phase 1: A\n")
 

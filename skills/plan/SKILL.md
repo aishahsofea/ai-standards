@@ -19,6 +19,7 @@ The issue, analysis, and decisions files named in the prompt. Read the code the 
 - Each phase is one small, independently reviewable diff with one concern. Prefer more, smaller phases. Optimize for review effort, not phase count.
 - Each phase runs in a fresh context that sees only this plan and earlier phase summaries, so the plan must stand alone.
 - Order phases so tests pass after each one. Defer unrelated cleanup.
+- No phase may wait for the owner mid-run. Anything only the owner can supply (a captured fixture, a login, a secret, access to a deployed service) goes under `## Prerequisites`, naming the phase that needs it. The owner sees that list before any code is written.
 
 ## Verify and acceptance criteria
 
@@ -33,6 +34,10 @@ Use exactly `## Phase N: <title>` headings, numbered from 1 with no gaps: the pi
 
 ```markdown
 # Plan: <feature>
+
+## Prerequisites
+<only if any; otherwise omit>
+- Phase N: <what the owner must supply, and where to put it>
 
 ## Assumptions
 <only if any; otherwise omit>

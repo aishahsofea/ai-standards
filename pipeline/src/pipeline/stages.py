@@ -44,7 +44,8 @@ FIX = Stage(
     "fix", "fix", ("issue", "plan", "test-report", "review.blocked"), "fix-summary", "sonnet", 60,
     "Fix the Critical and Required findings in the failed review.", ("done", "blocked"), "pipeline: fix review findings",
 )
-FIX_NOTE = "This is the only automatic fix round; if findings remain, the run stops."
+MAX_FIX_ROUNDS = 2
+FIX_NOTE = "This is automatic fix round {round} of {rounds}; if findings remain after the last round, the run stops."
 RECHECK_NOTE = "The fix stage changed the code after the review failed. Check the code as it is now."
 REREVIEW_NOTE = (
     f"{RECHECK_NOTE} Recheck every finding in review.blocked; drop one only if the code now fixes it "
@@ -305,15 +306,18 @@ class Pipeline:
             path.write_text(f"{existing}- {rule}\n")
 
     def _fix_round(self, test: Stage, review: Stage) -> str | None:
-        """Runs fix, test and review once after a failed review; returns the stage it stopped at, or None if the review passes."""
-        self.show("review failed; running one fix round")
+        """Runs fix, test and review after a failed review, up to MAX_FIX_ROUNDS times; returns the stage it stopped at, or None once the review passes."""
         review = replace(review, inputs=(*review.inputs, "review.blocked", FIX.output))
-        for stage, note in ((FIX, FIX_NOTE), (test, RECHECK_NOTE), (review, REREVIEW_NOTE)):
-            if self._execute(stage, note) == "blocked":
-                return stage.name
-            if stage is not review:
+        for number in range(1, MAX_FIX_ROUNDS + 1):
+            self.show(f"review failed; running fix round {number} of {MAX_FIX_ROUNDS}")
+            for stage in (FIX, test):
+                note = FIX_NOTE.format(round=number, rounds=MAX_FIX_ROUNDS) if stage is FIX else RECHECK_NOTE
+                if self._execute(stage, note) == "blocked":
+                    return stage.name
                 self.forge.checkpoint(stage.commit or f"pipeline: {stage.name}")
-        return None
+            if self._execute(review, REREVIEW_NOTE) == "done":
+                return None
+        return review.name
 
     def _ci_round(self, test: Stage) -> str | None:
         """Waits for the PR's checks and fixes failures; returns the stage it stopped at, or None when CI is green or absent."""

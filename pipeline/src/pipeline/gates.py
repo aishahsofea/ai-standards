@@ -88,7 +88,7 @@ def answer_escalated(decisions: str, ask: Callable[[str], str]) -> str:
 def plan_preview(plan: str) -> str:
     titles = [title.strip() for _, title in PHASE_HEADING.findall(plan)]
     phases = "Phases:\n" + "\n".join(f"{n}. {title}" for n, title in enumerate(titles, 1))
-    return "\n\n".join(part for part in (phases, section(plan, "Assumptions"), section(plan, "Out of scope")) if part)
+    return "\n\n".join(part for part in (section(plan, "Prerequisites"), phases, section(plan, "Assumptions"), section(plan, "Out of scope")) if part)
 
 
 def read_feedback(ask: Callable[[str], str]) -> str:
