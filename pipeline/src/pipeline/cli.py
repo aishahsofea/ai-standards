@@ -19,6 +19,7 @@ from pipeline.permissions import allowed_tools, ask_approvals, repo_checks
 from pipeline.run_dir import RunDir, slugify
 from pipeline.stages import CI_TIMEOUT_S, Pipeline
 from pipeline.stats import render_stats, run_stats
+from pipeline.worktree import create_worktree
 
 SKILLS_DIR = Path(__file__).resolve().parents[3] / "skills"
 AGENT_TIMEOUT_S = 1800
@@ -58,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true", help="use a fake agent and forge in a temp repo")
     run.add_argument("--repo", type=Path, default=Path.cwd(), help="target repo (default: current directory)")
     run.add_argument("--stop-after", metavar="STAGE", help="stop once this stage finishes")
+    run.add_argument("--worktree", action="store_true", help="work in a separate git worktree and leave this checkout alone")
     run.add_argument("--step", action="store_true", help="ask y/N after every stage, not only at the gates and the plan")
     revise = commands.add_parser("revise", help="apply your feedback to a finished run's branch")
     revise.add_argument("slug", help="the run to revise")
@@ -78,9 +80,18 @@ def post_cost(forge: Forge, ledger: CostLedger) -> None:
 
 
 def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -> tuple[Pipeline, RunDir, Forge, CostLedger]:
-    run_dir = RunDir(repo, slug)
-    state_path = run_dir.state_path
-    forge: Forge = FakeForge() if args.dry_run else GitHubForge(repo, slug, state, state_path)
+    state_path = RunDir(repo, slug).state_path
+    node_bin = None if args.dry_run else resolve_node_bin(repo)
+    if getattr(args, "worktree", False) and not state.worktree:
+        state.worktree = str(create_worktree(repo, slug, env_with_node(node_bin)))
+        state.save(state_path)
+    work = Path(state.worktree) if state.worktree else repo
+    if not work.is_dir():
+        raise ForgeError(f"the run's worktree {work} is missing")
+    if state.worktree:
+        print(f"Working in {work}")
+    run_dir = RunDir(repo, slug, work)
+    forge: Forge = FakeForge() if args.dry_run else GitHubForge(work, slug, state, state_path)
     forge.start_branch()
     state.save(state_path)
 
@@ -93,10 +104,9 @@ def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -
         approved.extend(allowed)
         return bool(allowed)
 
-    node_bin = None if args.dry_run else resolve_node_bin(repo)
     agent_for = (
         (lambda stage: fake_agent) if args.dry_run
-        else (lambda stage: ClaudeAgent(repo, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging), node_bin, (*allowed_tools(repo, stage.read_only), *approved)))
+        else (lambda stage: ClaudeAgent(work, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging), node_bin, (*allowed_tools(repo, stage.read_only), *approved)))
     )
     commands = () if args.dry_run else repo_checks(repo)
     if not (commands or args.dry_run):
@@ -109,7 +119,7 @@ def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -
         pause_each=getattr(args, "step", False),
         ask=None if args.dry_run else input,
         notify=(lambda _: None) if args.dry_run else notify,
-        checks=(lambda: run_checks(commands, repo, env_with_node(node_bin))) if commands else None,
+        checks=(lambda: run_checks(commands, work, env_with_node(node_bin))) if commands else None,
         approve=None if args.dry_run else approve_denials,
         ci_timeout_s=float(os.environ.get("CI_TIMEOUT_S", CI_TIMEOUT_S)),
     )
@@ -184,8 +194,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         if sum(map(bool, (args.idea, args.resume, args.issue))) != 1:
             parser.error("give exactly one of: an idea, --issue REF, --resume SLUG")
-        if args.dry_run and (args.resume or args.issue):
-            parser.error("--dry-run cannot resume or use --issue")
+        if args.dry_run and (args.resume or args.issue or args.worktree):
+            parser.error("--dry-run cannot resume or use --issue or --worktree")
     try:
         if args.command == "stats":
             print(render_stats([run_stats(issue) for issue in pipeline_issues(args.repo.resolve())]))

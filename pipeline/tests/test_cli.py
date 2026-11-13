@@ -21,7 +21,7 @@ def test_dry_run_stop_after_prints_resume_hint(capsys):
     assert "--resume add-dark-mode" in out
 
 
-@pytest.mark.parametrize("argv", [["run"], ["run", "idea", "--resume", "slug"], ["run", "--resume", "s", "--dry-run"]])
+@pytest.mark.parametrize("argv", [["run"], ["run", "idea", "--resume", "slug"], ["run", "--resume", "s", "--dry-run"], ["run", "idea", "--dry-run", "--worktree"]])
 def test_bad_arguments_exit_with_usage_error(argv):
     with pytest.raises(SystemExit) as exit_info:
         main(argv)
@@ -163,6 +163,27 @@ def test_real_agent_may_read_skills_and_staged_inputs(tmp_path, monkeypatch, fak
     run_in(tmp_path, "--stop-after", "issue")
     add_dirs = built[0][4]
     assert cli.SKILLS_DIR in add_dirs and len(add_dirs) == 2
+
+
+def test_worktree_run_works_there_and_a_resume_returns_to_it(tmp_path, monkeypatch, fake_github):
+    work = tmp_path / "wt"
+    work.mkdir()
+    created, built = [], []
+    monkeypatch.setattr(cli, "create_worktree", lambda repo, slug, env: created.append(slug) or work)
+    monkeypatch.setattr(cli, "ClaudeAgent", lambda *args: built.append(args) or FakeAgent(cli.dry_run_text))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    main(["run", "Add dark mode", "--repo", str(repo), "--worktree", "--stop-after", "issue"])
+    assert RunState.load(repo / ".agent" / "runs" / "add-dark-mode" / "state.json").worktree == str(work)
+    main(["run", "--resume", "add-dark-mode", "--repo", str(repo), "--stop-after", "analyze"])
+    assert created == ["add-dark-mode"]
+    assert {args[0] for args in built} == {work}
+
+
+def test_a_missing_worktree_is_an_error(tmp_path, monkeypatch, fake_github, capsys):
+    monkeypatch.setattr(cli, "create_worktree", lambda repo, slug, env: tmp_path / "gone")
+    assert run_in(tmp_path, "--worktree") == 1
+    assert "is missing" in capsys.readouterr().err
 
 
 def test_revise_unknown_run_fails_cleanly(tmp_path, capsys):

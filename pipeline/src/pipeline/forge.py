@@ -28,6 +28,10 @@ def run_command(command: tuple[str, ...], cwd: Path, *, retry: bool = False) -> 
         time.sleep(delay)
 
 
+def branch_name(slug: str) -> str:
+    return f"agent/{slug}"
+
+
 CheckState = Literal["pass", "fail", "pending"]
 RUN_ID = re.compile(r"/actions/runs/(\d+)")
 PASSING = {"SUCCESS", "NEUTRAL", "SKIPPED"}
@@ -123,6 +127,7 @@ class RunState:
     issue_url: str = ""
     pr_url: str = ""
     baseline: list[str] | None = None
+    worktree: str = ""
 
     @classmethod
     def load(cls, path: Path) -> "RunState":
@@ -186,7 +191,7 @@ class GitHubForge:
     def __init__(self, repo: Path, slug: str, state: RunState, state_path: Path) -> None:
         self.repo = repo
         self.slug = slug
-        self.branch = f"agent/{slug}"
+        self.branch = branch_name(slug)
         self.state = state
         self.state_path = state_path
         self._view: dict | None = None
