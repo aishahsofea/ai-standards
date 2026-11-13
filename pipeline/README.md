@@ -122,6 +122,14 @@ For changes you want after the run, such as UI or UX you dislike. Run it from th
 
 `revise` takes your feedback as the spec: it writes a failing test, changes the code, and posts a `revision-N` comment (feedback, changes, new acceptance criteria). Then `test`, `review` and `docs` run again, each reading the revision, and Gate B asks again. Each step is committed to the same branch. A blocked or failed step stops the run; reply on the issue or run `revise` again with clearer feedback. When your feedback reads as a UI rule specific to the target repo, the revision proposes it as a convention; the run shows it and asks y/N before appending it to `UX_CONVENTIONS.md` in the target repo, in the same commit. The stages that shape UI pick patterns with the [ui-conventions](../skills/ui-conventions/SKILL.md) skill: that file first, then the repo's existing patterns, then widely established web conventions. `review` fails a UI change that breaks a rule in the file.
 
+## Stats
+
+```sh
+pipeline stats [--repo PATH]
+```
+
+Reads the stage comments on every issue in the repo and prints one row per run: the stages that stopped it, the number of revisions and the cost. Below the table it counts stopped runs by stage and lists the first line of each `.blocked` report. A `.blocked` comment stays after a resume, so the table shows every stage that ever stopped a run. It spends nothing.
+
 ## What lands on GitHub
 
 - An issue (or the one you passed with `--issue`) holding one comment per stage.

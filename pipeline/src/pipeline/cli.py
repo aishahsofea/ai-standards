@@ -12,12 +12,13 @@ from pipeline.checks import run_checks
 from pipeline.claude_agent import ClaudeAgent
 from pipeline.cost import DEFAULT_BUDGET_USD, BudgetExceeded, CostLedger, prior_total, render_table
 from pipeline.evals import render_results, run_evals, run_review_evals
-from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue
+from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue, pipeline_issues
 from pipeline.gates import GateError, confirm
 from pipeline.node_bin import NodeNotFound, env_with_node, resolve_node_bin
 from pipeline.permissions import allowed_tools, ask_approvals, repo_checks
 from pipeline.run_dir import RunDir, slugify
 from pipeline.stages import CI_TIMEOUT_S, Pipeline
+from pipeline.stats import render_stats, run_stats
 
 SKILLS_DIR = Path(__file__).resolve().parents[3] / "skills"
 AGENT_TIMEOUT_S = 1800
@@ -63,6 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
     revise.add_argument("feedback", help="what should change")
     revise.add_argument("--repo", type=Path, default=Path.cwd(), help="target repo (default: current directory)")
     revise.set_defaults(dry_run=False)
+    stats = commands.add_parser("stats", help="show where past runs in a repo stopped and what they cost")
+    stats.add_argument("--repo", type=Path, default=Path.cwd(), help="target repo (default: current directory)")
     return parser
 
 
@@ -184,6 +187,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.dry_run and (args.resume or args.issue):
             parser.error("--dry-run cannot resume or use --issue")
     try:
+        if args.command == "stats":
+            print(render_stats([run_stats(issue) for issue in pipeline_issues(args.repo.resolve())]))
+            return 0
         return run_pipeline(args) if args.command == "run" else revise_pipeline(args)
     except (AgentError, BudgetExceeded, ForgeError, GateError, NodeNotFound) as error:
         print(f"error: {error}", file=sys.stderr)
