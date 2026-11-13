@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from pipeline.agent import Agent, Denial, Result
-from pipeline.checks import CheckRun, baseline_report
+from pipeline.checks import CheckRun, baseline_report, failure_sections, known_failures
 from pipeline.cost import CostLedger
 from pipeline.forge import Check, Forge, ForgeError
 from pipeline.gates import GATES, PHASE_HEADING, plan_preview, read_feedback
@@ -63,6 +63,8 @@ CI_RECHECK_NOTE = "The ci-fix stage changed the code after CI failed. Check the 
 MAX_CI_ROUNDS = 2
 BASELINE = "baseline"
 PREFLIGHT = "preflight"
+MAX_VERIFY_ROUNDS = 2
+VERIFY_RETRY = "These checks passed before your change and fail now:\n\n{failures}\n\nFix the cause, then reply with your complete report again."
 BASELINE_QUESTION = "These checks fail before any change. Continue and treat them as known failures?"
 CI_POLL_S = 15
 CI_GRACE_S = 120
@@ -247,7 +249,7 @@ class Pipeline:
         if not note and self.forge.has_artifact(stage.output):
             return "skipped"
         prompt = self.build_prompt(stage, note)
-        result = self._with_status(stage, prompt, self._run(stage, prompt))
+        result = self._verified(stage, prompt, self._with_status(stage, prompt, self._run(stage, prompt)))
         report = self._blocked_report(stage, result.text)
         if not report and (problems := self._problems(stage, result.text)):
             result = self._run(stage, retry_prompt(prompt, result.text, problems))
@@ -378,6 +380,33 @@ class Pipeline:
         result = self.agent_for(stage).run(prompt, stage.model, self.ledger.budget_usd - self.ledger.total(), resume=resume)
         self.ledger.record(stage.name, stage.model, result.cost_usd)
         return result
+
+    def _verified(self, stage: Stage, prompt: str, result: Result) -> Result:
+        """Runs the repo's checks after a stage reports done and sends new failures back to its session; blocks the stage if they persist."""
+        for attempt in range(MAX_VERIFY_ROUNDS + 1):
+            if not (failing := self._new_failures(stage, result)):
+                return result
+            failures = failure_sections(failing)
+            if attempt == MAX_VERIFY_ROUNDS:
+                break
+            self.show(f"{stage.name}: checks fail after the change; sending them back ({attempt + 1} of {MAX_VERIFY_ROUNDS})")
+            if result.session_id:
+                repair = self._run(stage, VERIFY_RETRY.format(failures=failures), resume=result)
+            else:
+                repair = self._run(stage, f"{prompt}\n\n{VERIFY_RETRY.format(failures=failures)}")
+            repair = self._with_status(stage, prompt, repair)
+            result = replace(repair, denials=(*result.denials, *repair.denials))
+        return replace(result, text=f"Status: blocked - checks still fail after {MAX_VERIFY_ROUNDS} repair rounds\n\n{failures}\n\n{result.text}")
+
+    def _new_failures(self, stage: Stage, result: Result) -> list[CheckRun]:
+        """Checks that fail now and passed in the baseline; empty unless the stage reports `done` and a baseline exists."""
+        status = STATUS.match(result.text)
+        if not (self.checks and status and status[1].lower() == "done" and "done" in stage.statuses):
+            return []
+        if (baseline := self.forge.read_artifact(BASELINE)) is None:
+            return []
+        known = known_failures(baseline)
+        return [run for run in self.checks() if not run.ok and run.command not in known]
 
     def _with_status(self, stage: Stage, prompt: str, result: Result) -> Result:
         """Asks once more when the reply's first-line status is missing or not allowed for the stage."""

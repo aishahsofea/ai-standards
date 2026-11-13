@@ -103,11 +103,12 @@ def test_no_resume_flag_by_default(agent, monkeypatch):
 def test_resume_continues_the_session_and_bills_only_the_new_cost(agent, monkeypatch):
     seen = {}
     monkeypatch.setattr(subprocess, "run", lambda command, **k: seen.update(command=command) or completed(payload(total_cost_usd=0.75)))
-    result = agent.run("again", "sonnet", 2.0, resume=Result("first", 0.5, session_id="abc"))
+    result = agent.run("again", "sonnet", 2.0, resume=Result("first", 0.2, session_id="abc", session_cost_usd=0.5))
     command = seen["command"]
     assert command[command.index("--resume") + 1] == "abc"
     assert command[command.index("--max-budget-usd") + 1] == "2.5"
     assert result.cost_usd == pytest.approx(0.25)
+    assert result.session_cost_usd == pytest.approx(0.75)
 
 
 def test_fake_agent_marks_resumed_calls():

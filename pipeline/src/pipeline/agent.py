@@ -27,6 +27,7 @@ class Result:
     cost_usd: float
     denials: tuple[Denial, ...] = ()
     session_id: str = ""
+    session_cost_usd: float = 0.0
 
 
 class Agent(Protocol):

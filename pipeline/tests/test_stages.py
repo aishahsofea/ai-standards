@@ -78,6 +78,7 @@ class Harness:
         self.review_reply = None
         self.queued: dict[str, list[str]] = {}
         self.follow_ups: list[str] = []
+        self.repairs: list[str] = []
         self.last = ""
         self.agent = FakeAgent(self._respond, cost_usd=cost)
         self.forge = FakeForge()
@@ -90,6 +91,8 @@ class Harness:
     def _respond(self, prompt):
         if prompt.startswith("Reply with your report only"):
             return self.follow_ups.pop(0) if self.follow_ups else self.last
+        if prompt.startswith("These checks passed before"):
+            return self.repairs.pop(0) if self.repairs else self.last
         self.last = self._reply(prompt)
         return self.last
 
@@ -196,6 +199,10 @@ def test_notifies_at_each_prompt(tmp_path):
     assert [note.split()[0] for note in notes] == ["decide", "plan", "docs"]
 
 
+def prompts_session(h, text):
+    return next(f"fake-{n}" for n, call in enumerate(h.agent.calls, 1) if text in call[0])
+
+
 def prompts_for(h, skill):
     return [call[0] for call in h.agent.calls if f"/{skill}/SKILL.md" in call[0]]
 
@@ -230,6 +237,63 @@ def test_preflight_does_not_run_once_analysis_exists(tmp_path):
     h.forge.artifacts.update(issue="# T", analysis=ANALYSIS)
     h.pipeline().run()
     assert not ran and "baseline" not in h.forge.artifacts
+
+
+class Checks:
+    """Passes the preflight, then returns each queued result once, then passes again."""
+
+    def __init__(self, *after_preflight):
+        self.queued = [[CheckRun("pytest", True)], *after_preflight]
+        self.calls = 0
+
+    def __call__(self):
+        self.calls += 1
+        return self.queued.pop(0) if self.queued else [CheckRun("pytest", True)]
+
+
+BROKEN = [CheckRun("pytest", False, "test_cart failed")]
+
+
+def test_checks_run_after_each_phase_but_not_after_test_or_review(tmp_path):
+    checks = Checks()
+    h = Harness(tmp_path, checks=checks)
+    h.pipeline().run()
+    assert checks.calls == 3
+    assert not h.agent.resumes
+
+
+def test_a_new_failure_goes_back_to_the_same_session(tmp_path):
+    h = Harness(tmp_path, checks=Checks(BROKEN))
+    h.repairs = ["Status: done\nrepaired"]
+    assert h.pipeline().run() is None
+    prompt, session = h.agent.resumes[0]
+    assert "test_cart failed" in prompt and session == prompts_session(h, "Implement only phase 1")
+    assert h.forge.artifacts["phase-1-summary"] == "Status: done\nrepaired"
+
+
+def test_a_failure_that_survives_two_repairs_blocks_the_phase(tmp_path):
+    h = Harness(tmp_path, checks=Checks(BROKEN, BROKEN, BROKEN))
+    assert h.pipeline().run() == "implement-phase-1"
+    assert len(h.agent.resumes) == 2
+    report = h.forge.artifacts["implement-phase-1.blocked"]
+    assert report.startswith("Status: blocked - checks still fail after 2 repair rounds") and "test_cart failed" in report
+    assert ("checkpoint", "phase 1: a") not in h.forge.calls
+
+
+def test_a_check_that_failed_in_the_baseline_is_not_sent_back(tmp_path):
+    checks = Checks()
+    checks.queued = [BROKEN, BROKEN, BROKEN]
+    h = Harness(tmp_path, checks=checks)
+    assert h.pipeline().run() is None
+    assert not h.agent.resumes
+
+
+def test_checks_do_not_run_after_a_phase_without_a_baseline(tmp_path):
+    checks = Checks()
+    h = Harness(tmp_path, checks=checks)
+    h.forge.artifacts.update(issue="# T", analysis=ANALYSIS, decisions=DECISIONS.replace("model?", "model?\n  Answer: sqlite"), plan=PLAN)
+    h.pipeline().run()
+    assert checks.calls == 0
 
 
 def test_plan_prompt_shows_preview_and_declining_stops(tmp_path):

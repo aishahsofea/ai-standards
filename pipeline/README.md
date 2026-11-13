@@ -54,6 +54,8 @@ On a new run the pipeline runs them itself after the issue stage, before any age
 - **All pass**: the run posts a `baseline` comment and continues.
 - **Any fail**: the run shows each failing command with the end of its output and asks once whether to continue. `N` stops the run before `analyze`. `y` posts the failures in the `baseline` comment; `implement-phase`, `test`, `fix`, `ci-fix` and `revise` read it and do not block on a failure listed there.
 
+After `implement-phase`, `fix`, `ci-fix` or `revise` reports `Status: done`, the pipeline runs the same commands again. A command that passed in the baseline and fails now goes back to the same agent session with the end of its output, up to two times. If it still fails, the stage stops as blocked with that output in the report. Commands that failed in the baseline are ignored here. The checks run after every phase, so keep slow suites such as a full Playwright run out of `checks`.
+
 This catches a repo whose checks cannot run (wrong Node, missing database, bad import path) and tests already failing on the base branch. Without `checks` the step is skipped. A resumed run never repeats it.
 
 ## Stages and comments
