@@ -52,6 +52,13 @@ def test_non_zero_exit_raises(agent, monkeypatch):
         agent.run("hi", "sonnet", 1)
 
 
+def test_non_zero_exit_reports_error_from_stdout(agent, monkeypatch):
+    stdout = payload(is_error=True, result="OAuth session expired")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: completed(stdout, returncode=1))
+    with pytest.raises(AgentError, match="claude exited 1: OAuth session expired"):
+        agent.run("hi", "sonnet", 1)
+
+
 def test_timeout_raises(agent, monkeypatch):
     def fake_run(*args, **kwargs):
         raise subprocess.TimeoutExpired("claude", 30)
