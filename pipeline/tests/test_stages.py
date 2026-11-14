@@ -176,16 +176,23 @@ def test_existing_issue_skips_the_issue_stage(tmp_path):
     assert ("open_issue", "Add dark mode") not in h.forge.calls
 
 
-def test_pause_after_each_executed_stage(tmp_path):
-    h = Harness(tmp_path, answers=lambda q: not q.startswith("analyze"))
+def test_pause_each_asks_after_every_executed_stage(tmp_path):
+    h = Harness(tmp_path, pause_each=True, answers=lambda q: not q.startswith("analyze"))
     assert h.pipeline().run() == "analyze"
     assert h.called_stages() == ["issue", "analyze"]
 
 
-def test_pause_each_off_only_asks_at_gates(tmp_path):
-    h = Harness(tmp_path, pause_each=False)
+def test_by_default_only_the_gates_and_the_plan_ask(tmp_path):
+    h = Harness(tmp_path)
     h.pipeline().run()
-    assert len(h.questions) == 2
+    assert [q.split()[0] for q in h.questions] == ["Escalated", "plan", "Reviewed"]
+
+
+def test_notifies_at_each_prompt(tmp_path):
+    notes = []
+    h = Harness(tmp_path, notify=notes.append)
+    h.pipeline().run()
+    assert [note.split()[0] for note in notes] == ["decide", "plan", "docs"]
 
 
 def test_plan_prompt_shows_preview_and_declining_stops(tmp_path):
