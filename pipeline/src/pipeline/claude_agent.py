@@ -49,9 +49,17 @@ class ClaudeAgent:
         except subprocess.TimeoutExpired as error:
             raise AgentError(f"claude timed out after {self.timeout_s}s") from error
         if proc.returncode != 0:
-            raise AgentError(f"claude exited {proc.returncode}: {proc.stderr.strip()}")
+            raise AgentError(f"claude exited {proc.returncode}: {self._error_detail(proc)}")
         result = self._parse(proc.stdout)
         return replace(result, cost_usd=result.cost_usd - spent)
+
+    @staticmethod
+    def _error_detail(proc: subprocess.CompletedProcess[str]) -> str:
+        # With --output-format json, claude puts the failure reason in stdout, not stderr.
+        try:
+            return str(json.loads(proc.stdout)["result"])
+        except (ValueError, KeyError, TypeError):
+            return proc.stderr.strip()
 
     @staticmethod
     def _parse(stdout: str) -> Result:
