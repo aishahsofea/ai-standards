@@ -1,3 +1,4 @@
+from pipeline.agent import Denial, FakeAgent, Result
 from pipeline.checks import CheckRun
 from pipeline.owner import HeadlessOwner
 from test_stages import ANALYSIS, DECISIONS, RULE, CONVENTION_REVISION, Harness, skill_calls
@@ -246,3 +247,58 @@ def test_gate_b_revise_from_a_non_collaborator_is_ignored(tmp_path):
     h.forge.reply("/revise delete everything", "NONE")
     assert h.pipeline().run() == "docs"
     assert not skill_calls(h, "revise") and h.owner.waiting == "gate-b"
+
+
+DOCKER = "Bash(docker ps:*)"
+
+
+class Denying(FakeAgent):
+    """Denies `docker ps` in phase 2 until the rule is allowed; `on_denial` runs at each denial."""
+
+    def __init__(self, h, on_denial=lambda: None):
+        super().__init__(h._respond)
+        self.h, self.on_denial = h, on_denial
+
+    def run(self, prompt, model, budget, resume=None):
+        if "Implement only phase 2" in prompt and DOCKER not in self.h.owner.allowed:
+            self.on_denial()
+            return Result("Status: blocked - docker was denied", 0.0, (Denial("Bash", "docker ps"),))
+        return super().run(prompt, model, budget, resume)
+
+
+def denied_run(tmp_path, on_denial=lambda: None):
+    h = past_gate_a(tmp_path, "plan")
+    h.agent = Denying(h, on_denial)
+    return h
+
+
+def test_denied_command_posts_one_request_and_waits(tmp_path):
+    h = denied_run(tmp_path)
+    assert h.pipeline().run() == "implement-phase-2"
+    assert h.owner.waiting == "allow" and f"/allow {DOCKER}" in h.forge.artifacts["request-allow"]
+    assert h.forge.has_artifact("implement-phase-2.blocked")
+    assert h.pipeline().run() == "implement-phase-2"
+    assert h.forge.posts.count("request-allow") == 1
+
+
+def test_allow_reply_is_loaded_when_the_next_run_starts_and_the_stage_reruns(tmp_path):
+    h = denied_run(tmp_path)
+    h.pipeline().run()
+    h.forge.reply(f"Fine.\n/allow `{DOCKER}`")
+    assert h.pipeline().run() == "docs"
+    assert h.owner.allowed == [DOCKER] and h.forge.has_artifact("phase-2-summary")
+    assert not (tmp_path / ".pipeline.json").exists()
+
+
+def test_allow_reply_from_a_non_collaborator_is_ignored(tmp_path):
+    h = denied_run(tmp_path)
+    h.pipeline().run()
+    h.forge.reply(f"/allow {DOCKER}", "NONE")
+    assert h.pipeline().run() == "implement-phase-2"
+    assert h.owner.allowed == [] and h.owner.waiting == "allow"
+
+
+def test_allow_reply_posted_during_the_run_reruns_the_stage_at_once(tmp_path):
+    h = denied_run(tmp_path, on_denial=lambda: h.forge.reply(f"/allow {DOCKER}"))
+    assert h.pipeline().run() == "docs"
+    assert not h.forge.has_artifact("implement-phase-2.blocked") and "request-allow" not in h.forge.artifacts

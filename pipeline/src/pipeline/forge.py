@@ -89,6 +89,7 @@ class Forge(Protocol):
     def read_artifact(self, name: str) -> str | None: ...
     def has_artifact(self, name: str) -> bool: ...
     def human_comments_after(self, name: str) -> list[str]: ...
+    def owner_replies(self) -> list[str]: ...
     def request(self, key: str, text: str) -> None: ...
     def decision(self, key: str) -> Decision | None: ...
     def withdraw(self, key: str) -> None: ...
@@ -194,6 +195,9 @@ class FakeForge:
         return name in self.artifacts
 
     def human_comments_after(self, name: str) -> list[str]:
+        return list(self.replies)
+
+    def owner_replies(self) -> list[str]:
         return list(self.replies)
 
     def reply(self, body: str, association: str = "OWNER") -> None:
@@ -303,7 +307,10 @@ class GitHubForge:
         position = next((i for i, c in enumerate(comments) if self._artifact_name(c) == name), None)
         if position is None:
             return []
-        return [c["body"] for c in comments[position + 1 :] if not self._artifact_name(c) and c["authorAssociation"] in TRUSTED]
+        return self._trusted_replies(comments[position + 1 :])
+
+    def owner_replies(self) -> list[str]:
+        return self._trusted_replies(self._issue_view()["comments"]) if self.state.issue_url else []
 
     def request(self, key: str, text: str) -> None:
         self.post_artifact(request_name(key), text)
@@ -370,6 +377,9 @@ class GitHubForge:
             if name := self._artifact_name(comment):
                 found.setdefault(name, comment)
         return found
+
+    def _trusted_replies(self, comments: list[dict]) -> list[str]:
+        return [c["body"] for c in comments if not self._artifact_name(c) and c["authorAssociation"] in TRUSTED]
 
     def _comment_endpoint(self, comment: dict) -> str:
         repo = "/".join(self.state.issue_url.split("/")[3:5])

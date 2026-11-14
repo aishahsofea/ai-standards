@@ -322,6 +322,13 @@ def test_no_decision_without_a_request_or_a_command(issue_forge):
     assert forge.decision("plan") is None
 
 
+def test_owner_replies_are_every_trusted_human_comment(issue_forge):
+    forge, _, comments = issue_forge
+    comments += [comment(None, "/allow Bash(make:*)", 1), comment("plan", id=2), comment(None, "/allow Bash(rm:*)", 3, "NONE")]
+    assert forge.owner_replies() == ["/allow Bash(make:*)"]
+    assert FakeForge().owner_replies() == []
+
+
 def test_withdraw_deletes_the_request_comment(issue_forge):
     forge, shell, comments = issue_forge
     comments.append(comment("request-gate-b", id=77))

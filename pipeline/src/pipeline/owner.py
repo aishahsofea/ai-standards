@@ -1,6 +1,6 @@
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from pipeline.agent import Denial
@@ -9,6 +9,7 @@ from pipeline.gates import GATE_A, GATE_B, escalated_entries
 
 CONVENTION = "convention"
 STEP = "step"
+ALLOW_KEY = "allow"
 RERUN = "then run the same command again."
 REPLY_HELP = f"Reply `/approve` to continue or `/reject` to stop, {RERUN}"
 GATE_A_HELP = (
@@ -18,6 +19,8 @@ GATE_A_HELP = (
 GATE_B_HELP = f"Reply `/approve` to mark the PR ready, `/revise <feedback>` to change it, or `/reject` to stop, {RERUN}"
 QUESTION = re.compile(r"\bQ(\d+)\b")
 ANSWER = re.compile(r"(?m)^Q(\d+):[ \t]*(.+)$")
+ALLOW = re.compile(r"(?m)^/allow[ \t]+`?([^`\n]+?)`?[ \t]*$")
+ALLOW_HELP = f"The agent was denied these commands. Reply `/allow <rule>` for each one it may run, {RERUN}"
 
 
 class Owner(Protocol):
@@ -57,8 +60,12 @@ class HeadlessOwner:
     """Reads the owner's decisions from replies on the issue; `waiting` is the request still without one."""
 
     forge: Forge
+    allowed: list[str] = field(default_factory=list)
     waiting: str | None = None
     asks_on_resume = True
+
+    def __post_init__(self) -> None:
+        self.allowed.extend(self._allowed_on_issue())
 
     def confirm(self, key: str, question: str, details: str = "") -> bool:
         if key == CONVENTION:
@@ -73,10 +80,22 @@ class HeadlessOwner:
         return {GATE_A.key: self._answer, GATE_B.key: self._take_feedback}.get(key)
 
     def approve(self, denials: tuple[Denial, ...]) -> bool:
+        """True when the owner allowed a denied rule since the run started; otherwise asks for the rules and waits."""
+        denied = sorted({denial.rule for denial in denials})
+        if granted := [rule for rule in self._allowed_on_issue() if rule in denied and rule not in self.allowed]:
+            self.allowed.extend(granted)
+            return True
+        text = "\n".join([ALLOW_HELP, "", *(f"- `/allow {rule}`" for rule in denied)])
+        if self.forge.read_artifact(request_name(ALLOW_KEY)) != text:
+            self.forge.request(ALLOW_KEY, text)
+        self.waiting = ALLOW_KEY
         return False
 
     def notify(self, message: str) -> None:
         pass
+
+    def _allowed_on_issue(self) -> list[str]:
+        return list(dict.fromkeys(ALLOW.findall("\n".join(self.forge.owner_replies()))))
 
     def _request(self, key: str, text: str) -> None:
         if not self.forge.has_artifact(request_name(key)):
