@@ -1,3 +1,4 @@
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -5,6 +6,7 @@ from pathlib import Path
 
 CHECK_TIMEOUT_S = 1800
 TAIL_CHARS = 3000
+FAILED_COMMAND = re.compile(r"(?m)^### `(.+)`$")
 
 
 @dataclass(frozen=True)
@@ -30,5 +32,12 @@ def baseline_report(runs: list[CheckRun]) -> str:
     failing = [run for run in runs if not run.ok]
     if not failing:
         return "Every check passed before this branch changed anything: " + ", ".join(f"`{run.command}`" for run in runs) + "."
-    sections = [f"### `{run.command}`\n\n```\n{run.tail}\n```" for run in failing]
-    return "\n\n".join(["These checks failed before this branch changed anything, so the failures below are not this branch's fault.", *sections])
+    return "These checks failed before this branch changed anything, so the failures below are not this branch's fault.\n\n" + failure_sections(failing)
+
+
+def failure_sections(runs: list[CheckRun]) -> str:
+    return "\n\n".join(f"### `{run.command}`\n\n```\n{run.tail}\n```" for run in runs)
+
+
+def known_failures(baseline: str) -> set[str]:
+    return set(FAILED_COMMAND.findall(baseline))

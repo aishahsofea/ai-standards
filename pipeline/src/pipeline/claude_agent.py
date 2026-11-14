@@ -25,7 +25,7 @@ class ClaudeAgent:
 
     def run(self, prompt: str, model: str, budget: float, resume: Result | None = None) -> Result:
         # Claude reports cost and budget per session, so a resumed call carries the earlier spend.
-        spent = resume.cost_usd if resume else 0.0
+        spent = resume.session_cost_usd if resume else 0.0
         command = [
             "claude", "-p", prompt,
             "--output-format", "json",
@@ -67,4 +67,4 @@ class ClaudeAgent:
         )
         for denial in denials:
             print(f"claude was denied {denial.tool} {denial.command!r}; add a rule for it to allowedTools in .pipeline.json", file=sys.stderr)
-        return Result(text, cost, denials, payload.get("session_id", ""))
+        return Result(text, cost, denials, payload.get("session_id", ""), cost)
