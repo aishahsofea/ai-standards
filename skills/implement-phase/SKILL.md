@@ -31,6 +31,7 @@ Build one phase of the plan and nothing else. Headless (the prompt says to run n
 
 - Implement only the named phase. Do not start later phases or clean up unrelated code.
 - If something the plan lists under `## Prerequisites` for this phase is missing, report `Status: blocked` naming it. Do not make up a substitute.
+- Run a command the plan lists under `## Commands` exactly as written; any other spelling is refused.
 - Do not commit, push, or open a PR; the pipeline does that.
 - A failure shown in `baseline.md`, when that file is among the inputs, was there before this branch. Report it as pre-existing; it does not make the status `blocked`.
 - Report results honestly: failures and skipped checks go in the summary.

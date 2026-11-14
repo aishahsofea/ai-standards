@@ -3,7 +3,7 @@ import json
 import pytest
 
 from pipeline.agent import Denial
-from pipeline.permissions import READ_ONLY_TOOLS, RUNNER_TOOLS, allowed_tools, ask_approvals, repo_checks, with_rtk
+from pipeline.permissions import READ_ONLY_TOOLS, RUNNER_TOOLS, allowed_tools, ask_approvals, command_rules, repo_checks, with_rtk
 
 
 def test_read_only_stages_get_no_runners(tmp_path):
@@ -26,6 +26,16 @@ def test_repo_checks_come_from_the_config(tmp_path):
     assert repo_checks(tmp_path) == ()
     (tmp_path / ".pipeline.json").write_text('{"checks": ["npm --prefix web test"]}')
     assert repo_checks(tmp_path) == ("npm --prefix web test",)
+
+
+def test_other_package_managers_get_runners_but_not_installs(tmp_path):
+    tools = allowed_tools(tmp_path, read_only=False)
+    assert {"Bash(pnpm test:*)", "Bash(pnpm exec playwright:*)", "Bash(yarn lint:*)", "Bash(bunx tsc:*)"} <= set(tools)
+    assert not [tool for tool in tools if " add" in tool or " install" in tool]
+
+
+def test_command_rules_allow_the_exact_command_only():
+    assert command_rules(("pnpm add -D x",)) == ("Bash(pnpm add -D x)", "Bash(rtk pnpm add -D x)")
 
 
 def test_rtk_prefixed_variants_are_allowed(tmp_path):

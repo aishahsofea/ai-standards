@@ -1,7 +1,7 @@
 from pipeline.agent import Denial, FakeAgent, Result
 from pipeline.checks import CheckRun
 from pipeline.owner import HeadlessOwner
-from test_stages import ANALYSIS, DECISIONS, RULE, CONVENTION_REVISION, Harness, skill_calls
+from test_stages import ANALYSIS, DECISIONS, PLAN, RULE, CONVENTION_REVISION, Harness, skill_calls
 
 ANSWERED = DECISIONS.replace("model?", "model?\n  Answer: sqlite")
 FAILING = [CheckRun("pytest", False, "9 failed")]
@@ -60,6 +60,13 @@ def test_plan_posts_one_request_and_waits_even_when_run_again(tmp_path):
     assert h.pipeline().run() == "plan"
     assert h.forge.posts.count("request-plan") == 1 and h.owner.waiting == "plan"
     assert "implement-phase-1" not in h.called_stages()
+
+
+def test_plan_request_lists_the_commands_approval_allows(tmp_path):
+    h = past_gate_a(tmp_path)
+    h.plan = "## Commands\n- Phase 1: `pnpm add -D x`\n" + PLAN
+    h.pipeline().run()
+    assert "- `pnpm add -D x`" in h.forge.artifacts["request-plan"]
 
 
 def test_approved_plan_continues(tmp_path):

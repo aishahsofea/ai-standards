@@ -20,6 +20,7 @@ The issue, analysis, and decisions files named in the prompt. Read the code the 
 - Each phase runs in a fresh context that sees only this plan and earlier phase summaries, so the plan must stand alone.
 - Order phases so tests pass after each one. Defer unrelated cleanup.
 - No phase may wait for the owner mid-run. Anything only the owner can supply (a captured fixture, a login, a secret, access to a deployed service) goes under `## Prerequisites`, naming the phase that needs it. The owner sees that list before any code is written.
+- Agents may run tests, lint, build and typecheck without asking. Any other command a phase must run (installing a dependency, a code generator) goes under `## Commands`, written exactly as the phase will run it, with no `cd`, pipes or `&&`. Approving the plan allows exactly those commands, so a different spelling is refused.
 
 ## Verify and acceptance criteria
 
@@ -38,6 +39,10 @@ Use exactly `## Phase N: <title>` headings, numbered from 1 with no gaps: the pi
 ## Prerequisites
 <only if any; otherwise omit>
 - Phase N: <what the owner must supply, and where to put it>
+
+## Commands
+<only if any; otherwise omit>
+- Phase N: `<exact command>`
 
 ## Assumptions
 <only if any; otherwise omit>

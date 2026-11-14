@@ -18,6 +18,14 @@ RUNNER_TOOLS = (
     "Bash(npm test:*)", "Bash(npm run test:*)", "Bash(npm run lint:*)", "Bash(npm run build:*)",
     "Bash(npm run typecheck:*)", "Bash(npm --prefix:*)",
     "Bash(npx vitest:*)", "Bash(npx tsc:*)", "Bash(npx eslint:*)", "Bash(npx playwright:*)", "Bash(npx --prefix:*)",
+    "Bash(pnpm test:*)", "Bash(pnpm lint:*)", "Bash(pnpm build:*)", "Bash(pnpm typecheck:*)",
+    "Bash(pnpm run test:*)", "Bash(pnpm run lint:*)", "Bash(pnpm run build:*)", "Bash(pnpm run typecheck:*)",
+    "Bash(pnpm exec vitest:*)", "Bash(pnpm exec tsc:*)", "Bash(pnpm exec eslint:*)", "Bash(pnpm exec playwright:*)",
+    "Bash(yarn test:*)", "Bash(yarn lint:*)", "Bash(yarn build:*)", "Bash(yarn typecheck:*)",
+    "Bash(yarn run test:*)", "Bash(yarn run lint:*)", "Bash(yarn run build:*)", "Bash(yarn run typecheck:*)",
+    "Bash(yarn vitest:*)", "Bash(yarn tsc:*)", "Bash(yarn eslint:*)", "Bash(yarn playwright:*)",
+    "Bash(bun test:*)", "Bash(bun run test:*)", "Bash(bun run lint:*)", "Bash(bun run build:*)", "Bash(bun run typecheck:*)",
+    "Bash(bunx vitest:*)", "Bash(bunx tsc:*)", "Bash(bunx eslint:*)", "Bash(bunx playwright:*)",
     "Bash(go test:*)", "Bash(go vet:*)", "Bash(cargo test:*)", "Bash(cargo check:*)", "Bash(cargo clippy:*)",
 )
 
@@ -44,6 +52,11 @@ def repo_checks(repo: Path) -> tuple[str, ...]:
 
 def allowed_tools(repo: Path, read_only: bool) -> tuple[str, ...]:
     return with_rtk(READ_ONLY_TOOLS if read_only else READ_ONLY_TOOLS + RUNNER_TOOLS + repo_tools(repo))
+
+
+def command_rules(commands: tuple[str, ...]) -> tuple[str, ...]:
+    """Rules that allow exactly these commands and nothing with more arguments."""
+    return with_rtk(tuple(f"Bash({command})" for command in commands))
 
 
 def save_repo_rule(repo: Path, rule: str) -> None:

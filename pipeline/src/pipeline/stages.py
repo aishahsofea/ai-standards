@@ -10,7 +10,7 @@ from pipeline.agent import Agent, Result
 from pipeline.checks import CheckRun, baseline_report, failure_sections, known_failures
 from pipeline.cost import CostLedger
 from pipeline.forge import Check, Forge, ForgeError
-from pipeline.gates import GATES, PHASE_HEADING, plan_preview, read_feedback
+from pipeline.gates import GATES, PHASE_HEADING, commands_notice, plan_preview, read_feedback
 from pipeline.owner import CONVENTION, STEP, Owner
 from pipeline.run_dir import RunDir
 from pipeline.validate import analysis_problems, decisions_problems, plan_problems, proposed_convention, reference_problems
@@ -469,7 +469,8 @@ class Pipeline:
             return approved
         question = f"{stage.name} done. Continue?"
         if stage.name == PLAN.name and (ran or self.owner.asks_on_resume):
-            self.show(plan_preview(self._artifact(PLAN.output)))
+            plan = self._artifact(PLAN.output)
+            self.show(plan_preview(plan))
             self.owner.notify("plan is waiting for your review")
-            return self.owner.confirm(PLAN.name, question)
+            return self.owner.confirm(PLAN.name, question, commands_notice(plan))
         return not (ran and self.pause_each) or self.owner.confirm(STEP, question)
