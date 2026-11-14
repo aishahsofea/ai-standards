@@ -1,6 +1,6 @@
 import pytest
 
-from pipeline.gates import GATE_A, GateError, answer_escalated, confirm, decisions_preview, escalated_entries, escalated_section, plan_preview
+from pipeline.gates import GATE_A, GateError, answer_escalated, confirm, decisions_preview, escalated_entries, escalated_section, plan_commands, plan_preview
 
 DECISIONS = """# Decisions
 
@@ -65,6 +65,12 @@ def test_plan_preview_lists_titles_assumptions_and_out_of_scope():
 def test_plan_preview_puts_prerequisites_first():
     preview = plan_preview("## Prerequisites\n- Phase 2: a captured fixture\n## Phase 1: A\n")
     assert preview.startswith("## Prerequisites\n- Phase 2: a captured fixture")
+
+
+def test_plan_commands_are_the_backticked_entries_under_commands():
+    plan = "## Commands\n- Phase 1: `pnpm add -D @playwright/test`\n- Phase 2: `pnpm add -D @playwright/test`\n## Phase 1: A\n- Verify: `pnpm test`\n"
+    assert plan_commands(plan) == ("pnpm add -D @playwright/test",)
+    assert "exactly these commands:\n- `pnpm add -D @playwright/test`" in plan_preview(plan)
 
 
 def test_plan_preview_omits_missing_sections():

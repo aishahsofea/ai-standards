@@ -9,6 +9,8 @@ PENDING = re.compile(r"(?mi)^(\s*Answer:)\s*_?pending_?\s*$")
 REVISIT = re.compile(r"(?mi)^\s*Answer:\s*\[revisit\]")
 RECOMMENDATION = re.compile(r"Recommendation:\s*(.+)")
 PHASE_HEADING = re.compile(r"^#{2,3} Phase (\d+)(?::\s*(.*))?", re.MULTILINE)
+PLAN_COMMAND = re.compile(r"(?m)^[-*] [^`\n]*`([^`\n]+)`")
+COMMANDS_NOTE = "Approving the plan allows the agent to run exactly these commands:"
 
 
 class GateError(Exception):
@@ -86,10 +88,20 @@ def answer_escalated(decisions: str, ask: Callable[[str], str]) -> str:
     return decisions
 
 
+def plan_commands(plan: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(PLAN_COMMAND.findall(section(plan, "Commands"))))
+
+
+def commands_notice(plan: str) -> str:
+    commands = plan_commands(plan)
+    return "\n".join([COMMANDS_NOTE, *(f"- `{command}`" for command in commands)]) if commands else ""
+
+
 def plan_preview(plan: str) -> str:
     titles = [title.strip() for _, title in PHASE_HEADING.findall(plan)]
     phases = "Phases:\n" + "\n".join(f"{n}. {title}" for n, title in enumerate(titles, 1))
-    return "\n\n".join(part for part in (section(plan, "Prerequisites"), phases, section(plan, "Assumptions"), section(plan, "Out of scope")) if part)
+    parts = (section(plan, "Prerequisites"), commands_notice(plan), phases, section(plan, "Assumptions"), section(plan, "Out of scope"))
+    return "\n\n".join(part for part in parts if part)
 
 
 def read_feedback(ask: Callable[[str], str]) -> str:

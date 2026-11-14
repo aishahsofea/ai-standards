@@ -13,12 +13,12 @@ from pipeline.claude_agent import ClaudeAgent
 from pipeline.cost import DEFAULT_BUDGET_USD, BudgetExceeded, CostLedger, prior_total, render_table
 from pipeline.evals import render_results, run_evals, run_review_evals
 from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue, pipeline_issues, request_name
-from pipeline.gates import GateError, confirm
+from pipeline.gates import GateError, confirm, plan_commands
 from pipeline.node_bin import NodeNotFound, env_with_node, resolve_node_bin
 from pipeline.owner import HeadlessOwner, Owner, TerminalOwner
-from pipeline.permissions import allowed_tools, ask_approvals, repo_checks
+from pipeline.permissions import allowed_tools, ask_approvals, command_rules, repo_checks
 from pipeline.run_dir import RunDir, slugify
-from pipeline.stages import CI_TIMEOUT_S, Pipeline
+from pipeline.stages import CI_TIMEOUT_S, PLAN, Pipeline, Stage
 from pipeline.stats import render_stats, run_stats
 from pipeline.worktree import create_worktree
 
@@ -110,9 +110,15 @@ def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -
         approved.extend(allowed)
         return bool(allowed)
 
+    def tools(stage: Stage) -> tuple[str, ...]:
+        """A stage that reads the plan only runs after the owner approved it, and its commands with it."""
+        follows_plan = PLAN.output in stage.inputs and not stage.read_only
+        plan = forge.read_artifact(PLAN.output) or "" if follows_plan else ""
+        return (*allowed_tools(repo, stage.read_only), *approved, *command_rules(plan_commands(plan)))
+
     agent_for = (
         (lambda stage: fake_agent) if args.dry_run
-        else (lambda stage: ClaudeAgent(work, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging), node_bin, (*allowed_tools(repo, stage.read_only), *approved), {EVIDENCE_ENV: str(run_dir.evidence)}))
+        else (lambda stage: ClaudeAgent(work, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging), node_bin, tools(stage), {EVIDENCE_ENV: str(run_dir.evidence)}))
     )
     commands = () if args.dry_run else repo_checks(repo)
     if not (commands or args.dry_run):
