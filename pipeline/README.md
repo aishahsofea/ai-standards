@@ -39,7 +39,7 @@ pipeline run "Add a dark mode toggle" --dry-run
 | `--stop-after STAGE` | Stop once that stage finishes, for example `plan`. |
 | `--step` | Ask `y/N` after every stage, not only at the gates and after `plan`. |
 
-The run asks `y/N` three times: at the two gates and after `plan`. At the gates it shows what you must review. After `plan` it shows the phase titles, `## Assumptions` and `## Out of scope`, so you can decline before any code is written. Each prompt, and a run that stops, rings the terminal bell and on macOS shows a notification.
+The run asks `y/N` three times: at the two gates and after `plan`. At the gates it shows what you must review. After `plan` it shows `## Prerequisites` (what only you can supply, such as a captured fixture or a login), the phase titles, `## Assumptions` and `## Out of scope`, so you can supply them or decline before any code is written. Each prompt, and a run that stops, rings the terminal bell and on macOS shows a notification.
 
 ## Preflight
 
@@ -78,7 +78,7 @@ Before a stage runs, the pipeline copies its input comments into a temp folder o
 | docs | `docs` | sonnet | plan, summaries, test report, review | `pr` |
 | ci-fix | `ci-fix` | sonnet | issue, plan, test report, CI failure log | `ci-fix-N` |
 
-`review` cannot edit files. It labels findings Critical, Required or Nit and starts with `Status: pass`, or `Status: fail` if any finding is Critical or Required. A fail runs one fix round: `fix` applies the Critical and Required findings, then `test` and `review` run again, with the review also reading `fix-summary`. If any of the three blocks or fails, the run stops and `docs` does not run until `--resume` passes the review. A `--resume` after a failed review starts with another fix round, not a fresh review, and the review after it reads the failed `review.blocked` so its findings carry over.
+`review` cannot edit files. It labels findings Critical, Required or Nit and starts with `Status: pass`, or `Status: fail` if any finding is Critical or Required. A fail runs a fix round: `fix` applies the Critical and Required findings, then `test` and `review` run again, with the review also reading `fix-summary`. If that review fails too, a second round runs from its findings. If `fix` or `test` blocks, or the review still fails after two rounds, the run stops and `docs` does not run until `--resume` passes the review. A `--resume` after a failed review starts with another fix round, not a fresh review, and the review after it reads the failed `review.blocked` so its findings carry over.
 
 `decide` sorts each open question into one of three groups: decided from code, decided and recorded as low-risk, or escalated to you.
 

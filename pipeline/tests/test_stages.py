@@ -436,11 +436,21 @@ def test_failed_review_runs_one_fix_round_then_continues(tmp_path):
     assert ("checkpoint", "pipeline: fix review findings") in h.forge.calls
 
 
-def test_review_failing_after_fix_round_blocks_and_docs_never_runs(tmp_path):
+def test_a_second_fix_round_reads_the_review_of_the_first(tmp_path):
+    h = Harness(tmp_path)
+    h.queued["review"] = ["Status: fail\n- Critical: SQL injection", "Status: fail\n- Required: missing escape"]
+    assert h.pipeline().run() is None
+    first, second = skill_calls(h, "fix")
+    assert "round 1 of 2" in first and "round 2 of 2" in second
+    assert "missing escape" in staged(second, "review.blocked")
+    assert h.forge.has_artifact("pr")
+
+
+def test_review_failing_after_two_fix_rounds_blocks_and_docs_never_runs(tmp_path):
     h = Harness(tmp_path)
     h.review_reply = "Status: fail\n- Critical: SQL injection"
     assert h.pipeline().run() == "review"
-    assert len(skill_calls(h, "fix")) == 1
+    assert len(skill_calls(h, "fix")) == 2
     assert "SQL injection" in h.forge.artifacts["review.blocked"]
     assert not h.forge.has_artifact("review")
     assert "docs" not in h.called_stages()
