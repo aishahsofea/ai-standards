@@ -308,6 +308,13 @@ def test_decision_keeps_the_text_after_the_command(issue_forge):
     assert forge.decision("gate-b") == Decision("revise", "Use a modal\n\nnot inline")
 
 
+def test_decision_reads_a_command_below_a_quote_reply(issue_forge):
+    forge, _, comments = issue_forge
+    quoted = "> ## Request plan\n> plan done. Continue?\n> Reply `/reject` to stop.\n\n/approve"
+    comments += [comment("request-plan", id=1), comment(None, quoted, 2)]
+    assert forge.decision("plan") == Decision("approve")
+
+
 def test_decision_ignores_non_collaborators(issue_forge):
     forge, _, comments = issue_forge
     comments += [comment("request-plan", id=1), comment(None, "/approve", 2, "NONE")]
