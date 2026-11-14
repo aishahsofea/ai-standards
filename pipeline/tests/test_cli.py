@@ -163,6 +163,7 @@ def test_real_agent_may_read_skills_and_staged_inputs(tmp_path, monkeypatch, fak
     run_in(tmp_path, "--stop-after", "issue")
     add_dirs = built[0][4]
     assert cli.SKILLS_DIR in add_dirs and len(add_dirs) == 2
+    assert built[0][7] == {"PIPELINE_EVIDENCE_DIR": str(tmp_path / ".agent" / "runs" / "add-dark-mode" / "evidence")}
 
 
 def test_worktree_run_works_there_and_a_resume_returns_to_it(tmp_path, monkeypatch, fake_github):

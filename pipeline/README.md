@@ -129,7 +129,7 @@ After `docs` and before Gate B, the run waits for the PR's CI checks on the push
 ## Gates
 
 - **Gate A**, after `decide`: the run prints the decided items, then the open part of the `## Escalated` section of the `decisions` comment. It stops, even if you approve, while any escalated question is unanswered, and errors if `## Escalated` is missing or unreadable. The run asks for each open question in the terminal: type an answer, `r` to accept the recommendation, `m` for a multi-line answer (end with a blank line), or Enter to skip. Start with `!` when the answer changes an earlier decision: `decide` then reruns once with the answers and revises the affected items. Answers are written back to the comment. You can also edit the comment on GitHub, or reply in a new comment. After you approve, the plan stage reads the edited comment and any later replies.
-- **Gate B**, after `docs`: the run prints the `pr` comment. Approving puts its current text in the PR description and marks the PR ready. Merging is still manual. Answering `N` offers a feedback prompt (Enter to stop, `m` for multi-line); feedback runs [revise](#revise).
+- **Gate B**, after `docs`: the run prints the `pr` comment, then the paths of any screenshots the `test` stage saved. In a repo with Playwright, `test` saves one per criterion and viewport under `.agent/runs/<slug>/evidence/` in your checkout (the pipeline sets `PIPELINE_EVIDENCE_DIR` for the agents); they are never committed. Approving puts its current text in the PR description and marks the PR ready. Merging is still manual. Answering `N` offers a feedback prompt (Enter to stop, `m` for multi-line); feedback runs [revise](#revise).
 
 ## Revise
 

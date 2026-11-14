@@ -450,6 +450,8 @@ class Pipeline:
             if not ran and not gate.needs_input(artifact):
                 return True
             self.show(gate.preview(artifact))
+            if gate.publishes and (screenshots := self.run_dir.screenshots()):
+                self.show("Screenshots to review:\n" + bullets([str(path) for path in screenshots]))
             self.notify(f"{stage.name} is waiting for your review")
             if self.ask and gate.answer and (updated := gate.answer(artifact, self.ask)) != artifact:
                 self.forge.post_artifact(gate.artifact, updated)
