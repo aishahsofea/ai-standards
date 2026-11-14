@@ -12,6 +12,8 @@ MAX_COMMENT_CHARS = 65_536
 MARKER = re.compile(r"\A<!-- pipeline:artifact=(\S+) -->")
 EXCLUDE_RUNS = ":!.agent/runs"
 RETRY_DELAYS = (1, 2)
+TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
+COMMAND = re.compile(r"/(approve|reject|revise|allow)(?!\S)\s*(.*)", re.DOTALL)
 
 
 class ForgeError(Exception):
@@ -63,6 +65,21 @@ def check_from_rollup(entry: dict) -> Check:
     return Check(name, state, link)
 
 
+@dataclass(frozen=True)
+class Decision:
+    command: str
+    text: str = ""
+
+
+def request_name(key: str) -> str:
+    return f"request-{key}"
+
+
+def first_command(replies: list[str]) -> Decision | None:
+    matches = (COMMAND.match(reply.strip()) for reply in replies)
+    return next((Decision(match[1], match[2].strip()) for match in matches if match), None)
+
+
 class Forge(Protocol):
     def start_branch(self) -> None: ...
     def open_issue(self, title: str, body: str) -> None: ...
@@ -72,6 +89,11 @@ class Forge(Protocol):
     def read_artifact(self, name: str) -> str | None: ...
     def has_artifact(self, name: str) -> bool: ...
     def human_comments_after(self, name: str) -> list[str]: ...
+    def owner_replies(self) -> list[str]: ...
+    def request(self, key: str, text: str) -> None: ...
+    def decision(self, key: str) -> Decision | None: ...
+    def withdraw(self, key: str) -> None: ...
+    def head(self) -> str: ...
     def ci_checks(self) -> list[Check] | None: ...
     def ci_logs(self, failing: list[Check]) -> str: ...
     def base_failures(self) -> set[str]: ...
@@ -143,6 +165,8 @@ class FakeForge:
         self.artifacts: dict[str, str] = {}
         self.posts: list[str] = []
         self.replies: list[str] = []
+        self.requested_at: dict[str, int] = {}
+        self.head_commit = "c0ffee"
         self.ci_results: list[list[Check] | None] = [[Check("ci", "pass")]]
         self.on_base: set[str] = set()
 
@@ -172,6 +196,27 @@ class FakeForge:
 
     def human_comments_after(self, name: str) -> list[str]:
         return list(self.replies)
+
+    def owner_replies(self) -> list[str]:
+        return list(self.replies)
+
+    def reply(self, body: str, association: str = "OWNER") -> None:
+        if association in TRUSTED:
+            self.replies.append(body)
+
+    def request(self, key: str, text: str) -> None:
+        self.post_artifact(request_name(key), text)
+        self.requested_at.setdefault(key, len(self.replies))
+
+    def decision(self, key: str) -> Decision | None:
+        return first_command(self.replies[self.requested_at[key] :]) if key in self.requested_at else None
+
+    def withdraw(self, key: str) -> None:
+        self.calls.append(("withdraw", key))
+        del self.artifacts[request_name(key)], self.requested_at[key]
+
+    def head(self) -> str:
+        return self.head_commit
 
     def ci_checks(self) -> list[Check] | None:
         return self.ci_results.pop(0) if len(self.ci_results) > 1 else self.ci_results[0]
@@ -238,9 +283,7 @@ class GitHubForge:
             raise ForgeError(f"no issue yet to post the '{name}' comment on")
         existing = self._artifact_comments().get(name)
         if existing:
-            comment_id = existing["url"].rsplit("-", 1)[1]
-            repo = "/".join(self.state.issue_url.split("/")[3:5])
-            self._run("gh", "api", "-X", "PATCH", f"repos/{repo}/issues/comments/{comment_id}", "-f", f"body={body}")
+            self._run("gh", "api", "-X", "PATCH", self._comment_endpoint(existing), "-f", f"body={body}")
         else:
             self._run("gh", "issue", "comment", self.state.issue_url, "--body", body)
         self._view = None
@@ -264,7 +307,24 @@ class GitHubForge:
         position = next((i for i, c in enumerate(comments) if self._artifact_name(c) == name), None)
         if position is None:
             return []
-        return [c["body"] for c in comments[position + 1 :] if not self._artifact_name(c)]
+        return self._trusted_replies(comments[position + 1 :])
+
+    def owner_replies(self) -> list[str]:
+        return self._trusted_replies(self._issue_view()["comments"]) if self.state.issue_url else []
+
+    def request(self, key: str, text: str) -> None:
+        self.post_artifact(request_name(key), text)
+
+    def decision(self, key: str) -> Decision | None:
+        return first_command(self.human_comments_after(request_name(key)))
+
+    def withdraw(self, key: str) -> None:
+        if comment := self._artifact_comments().get(request_name(key)):
+            self._run("gh", "api", "-X", "DELETE", self._comment_endpoint(comment))
+            self._view = None
+
+    def head(self) -> str:
+        return self._run("git", "rev-parse", "HEAD")
 
     def ci_checks(self) -> list[Check] | None:
         """None until GitHub reports the local HEAD as the PR head."""
@@ -272,7 +332,7 @@ class GitHubForge:
             return []
         output = self._run("gh", "pr", "view", self.state.pr_url, "--json", "headRefOid,statusCheckRollup", retry=True)
         view = json.loads(output)
-        if view["headRefOid"] != self._run("git", "rev-parse", "HEAD"):
+        if view["headRefOid"] != self.head():
             return None
         return [check_from_rollup(entry) for entry in view["statusCheckRollup"]]
 
@@ -317,6 +377,13 @@ class GitHubForge:
             if name := self._artifact_name(comment):
                 found.setdefault(name, comment)
         return found
+
+    def _trusted_replies(self, comments: list[dict]) -> list[str]:
+        return [c["body"] for c in comments if not self._artifact_name(c) and c["authorAssociation"] in TRUSTED]
+
+    def _comment_endpoint(self, comment: dict) -> str:
+        repo = "/".join(self.state.issue_url.split("/")[3:5])
+        return f"repos/{repo}/issues/comments/{comment['url'].rsplit('-', 1)[1]}"
 
     @staticmethod
     def _artifact_name(comment: dict) -> str | None:

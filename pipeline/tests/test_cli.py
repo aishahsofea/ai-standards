@@ -190,3 +190,60 @@ def test_a_missing_worktree_is_an_error(tmp_path, monkeypatch, fake_github, caps
 def test_revise_unknown_run_fails_cleanly(tmp_path, capsys):
     assert main(["revise", "nothing", "make it a modal", "--repo", str(tmp_path)]) == 1
     assert "no run 'nothing'" in capsys.readouterr().err
+
+
+def test_headless_run_waits_on_the_owner_with_exit_3(capsys):
+    assert main(["run", "Add dark mode", "--dry-run", "--headless"]) == 3
+    out = capsys.readouterr().out
+    assert "Waiting on the owner" in out and "request-plan" in out and "--headless" in out
+
+
+def test_headless_cannot_combine_with_step():
+    with pytest.raises(SystemExit) as exit_info:
+        main(["run", "idea", "--headless", "--step"])
+    assert exit_info.value.code == 2
+
+
+def no_stdin(monkeypatch):
+    def fail(*_):
+        raise AssertionError("headless mode read the terminal")
+
+    monkeypatch.setattr("builtins.input", fail)
+    monkeypatch.setattr(cli, "confirm", fail)
+    monkeypatch.setattr(cli, "notify", fail)
+
+
+def test_headless_run_continues_from_replies_and_finishes_with_exit_0(tmp_path, monkeypatch, fake_github, capsys):
+    use_agent(monkeypatch, FakeAgent(cli.dry_run_text))
+    no_stdin(monkeypatch)
+    assert run_in(tmp_path, "--headless") == 3
+    fake_github.reply("/approve")
+    resume = ["run", "--resume", "add-dark-mode", "--repo", str(tmp_path), "--headless"]
+    assert main(resume) == 3
+    assert "request-gate-b" in capsys.readouterr().out
+    fake_github.reply("/approve")
+    assert main(resume) == 0
+    assert fake_github.calls[-1][0] == "finish"
+
+
+def test_headless_run_passes_allow_replies_to_the_agent(tmp_path, monkeypatch, fake_github):
+    built = []
+    monkeypatch.setattr(cli, "ClaudeAgent", lambda *args: built.append(args) or FakeAgent(cli.dry_run_text))
+    fake_github.reply("/allow Bash(docker ps:*)")
+    run_in(tmp_path, "--headless", "--stop-after", "issue")
+    assert "Bash(docker ps:*)" in built[0][6]
+
+
+def test_headless_stop_that_is_not_a_wait_exits_0(tmp_path, monkeypatch, fake_github):
+    use_agent(monkeypatch, FakeAgent(lambda prompt: "Status: blocked - nope"))
+    assert run_in(tmp_path, "--headless") == 0
+
+
+def test_headless_revise_waits_at_gate_b(tmp_path, monkeypatch, fake_github, capsys):
+    use_agent(monkeypatch, FakeAgent(lambda prompt: "Status: done\nrevised" if "/revise/SKILL.md" in prompt else cli.dry_run_text(prompt)))
+    no_stdin(monkeypatch)
+    run_in(tmp_path, "--headless")
+    fake_github.reply("/approve")
+    assert main(["run", "--resume", "add-dark-mode", "--repo", str(tmp_path), "--headless"]) == 3
+    assert main(["revise", "add-dark-mode", "Use a modal", "--repo", str(tmp_path), "--headless"]) == 3
+    assert "revision-1" in fake_github.artifacts and "request-gate-b" in capsys.readouterr().out

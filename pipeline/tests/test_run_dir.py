@@ -69,3 +69,12 @@ def test_known_artifact_names_accepted(tmp_path, name):
 def test_state_path_is_in_run_dir(tmp_path):
     run = RunDir(tmp_path, "feat")
     assert run.state_path == run.path / "state.json"
+
+
+def test_request_artifacts_exist_only_for_ask_points(tmp_path):
+    from pipeline.run_dir import check_artifact
+
+    for key in ("baseline", "gate-a", "plan", "gate-b", "allow"):
+        check_artifact(f"request-{key}")
+    with pytest.raises(ValueError):
+        check_artifact("request-step")

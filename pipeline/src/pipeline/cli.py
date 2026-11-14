@@ -12,9 +12,10 @@ from pipeline.checks import run_checks
 from pipeline.claude_agent import ClaudeAgent
 from pipeline.cost import DEFAULT_BUDGET_USD, BudgetExceeded, CostLedger, prior_total, render_table
 from pipeline.evals import render_results, run_evals, run_review_evals
-from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue, pipeline_issues
+from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue, pipeline_issues, request_name
 from pipeline.gates import GateError, confirm
 from pipeline.node_bin import NodeNotFound, env_with_node, resolve_node_bin
+from pipeline.owner import HeadlessOwner, Owner, TerminalOwner
 from pipeline.permissions import allowed_tools, ask_approvals, repo_checks
 from pipeline.run_dir import RunDir, slugify
 from pipeline.stages import CI_TIMEOUT_S, Pipeline
@@ -24,6 +25,8 @@ from pipeline.worktree import create_worktree
 SKILLS_DIR = Path(__file__).resolve().parents[3] / "skills"
 AGENT_TIMEOUT_S = 1800
 EVIDENCE_ENV = "PIPELINE_EVIDENCE_DIR"
+HEADLESS_HELP = "never read the terminal: ask on the issue and exit 3 while waiting for a reply"
+WAITING_EXIT = 3
 
 
 def dry_run_text(prompt: str) -> str:
@@ -62,10 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--stop-after", metavar="STAGE", help="stop once this stage finishes")
     run.add_argument("--worktree", action="store_true", help="work in a separate git worktree and leave this checkout alone")
     run.add_argument("--step", action="store_true", help="ask y/N after every stage, not only at the gates and the plan")
+    run.add_argument("--headless", action="store_true", help=HEADLESS_HELP)
     revise = commands.add_parser("revise", help="apply your feedback to a finished run's branch")
     revise.add_argument("slug", help="the run to revise")
     revise.add_argument("feedback", help="what should change")
     revise.add_argument("--repo", type=Path, default=Path.cwd(), help="target repo (default: current directory)")
+    revise.add_argument("--headless", action="store_true", help=HEADLESS_HELP)
     revise.set_defaults(dry_run=False)
     stats = commands.add_parser("stats", help="show where past runs in a repo stopped and what they cost")
     stats.add_argument("--repo", type=Path, default=Path.cwd(), help="target repo (default: current directory)")
@@ -114,14 +119,17 @@ def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -
         print('No preflight: list the check commands under "checks" in .pipeline.json to run them before any change.', file=sys.stderr)
     budget = float(os.environ.get("BUDGET_USD", DEFAULT_BUDGET_USD))
     ledger = CostLedger(budget, prior_total(forge.read_artifact("cost")))
+    owner: Owner
+    if args.headless:
+        owner = HeadlessOwner(forge, approved)
+    elif args.dry_run:
+        owner = TerminalOwner(lambda _: True)
+    else:
+        owner = TerminalOwner(confirm, input, approve_denials, notify)
     pipeline = Pipeline(
-        run_dir, ledger, agent_for, SKILLS_DIR, state.idea,
-        (lambda _: True) if args.dry_run else confirm, print, forge, stop_after=getattr(args, "stop_after", None),
-        pause_each=getattr(args, "step", False),
-        ask=None if args.dry_run else input,
-        notify=(lambda _: None) if args.dry_run else notify,
+        run_dir, ledger, agent_for, SKILLS_DIR, state.idea, owner, print, forge,
+        stop_after=getattr(args, "stop_after", None), pause_each=getattr(args, "step", False),
         checks=(lambda: run_checks(commands, work, env_with_node(node_bin))) if commands else None,
-        approve=None if args.dry_run else approve_denials,
         ci_timeout_s=float(os.environ.get("CI_TIMEOUT_S", CI_TIMEOUT_S)),
     )
     return pipeline, run_dir, forge, ledger
@@ -136,9 +144,15 @@ def finish_run(pipeline: Pipeline, pipeline_run: Callable[[], str | None], run_d
     spent = f"spent ${ledger.total():.2f}"
     if stopped is None:
         print(f"Finished; {spent}")
+    elif waiting := pipeline.owner.waiting:
+        print(
+            f"Waiting on the owner at '{stopped}'; {spent}. Reply to the '{request_name(waiting)}' comment on the issue, "
+            f"then run: pipeline run --resume {slug} --headless"
+        )
+        return WAITING_EXIT
     else:
         print(f"Stopped at '{stopped}'; {spent}. Resume with: pipeline run --resume {slug}")
-        pipeline.notify(f"{slug} stopped at {stopped}")
+        pipeline.owner.notify(f"{slug} stopped at {stopped}")
     return 0
 
 
@@ -197,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("give exactly one of: an idea, --issue REF, --resume SLUG")
         if args.dry_run and (args.resume or args.issue or args.worktree):
             parser.error("--dry-run cannot resume or use --issue or --worktree")
+        if args.headless and args.step:
+            parser.error("--headless cannot be used with --step")
     try:
         if args.command == "stats":
             print(render_stats([run_stats(issue) for issue in pipeline_issues(args.repo.resolve())]))

@@ -17,6 +17,7 @@ class GateError(Exception):
 
 @dataclass(frozen=True)
 class Gate:
+    key: str
     after: str
     message: str
     artifact: str
@@ -103,9 +104,9 @@ def confirm(question: str, ask: Callable[[str], str] = input) -> bool:
 
 
 GATE_A = Gate(
-    "decide", "Escalated questions answered in the decisions comment on the issue (edit it or reply). Continue?",
+    "gate-a", "decide", "Escalated questions answered in the decisions comment on the issue (edit it or reply). Continue?",
     "decisions", decisions_preview, needs_input=lambda decisions: bool(escalated_entries(decisions)), answer=answer_escalated,
     unresolved=escalated_entries, needs_rerun=lambda decisions: bool(REVISIT.search(decisions)),
 )
-GATE_B = Gate("docs", "Reviewed the PR text and changes. Mark the PR ready?", "pr", str.strip, publishes=True, revisable=True)
+GATE_B = Gate("gate-b", "docs", "Reviewed the PR text and changes. Mark the PR ready?", "pr", str.strip, publishes=True, revisable=True)
 GATES = {gate.after: gate for gate in (GATE_A, GATE_B)}

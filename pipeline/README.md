@@ -39,8 +39,41 @@ pipeline run "Add a dark mode toggle" --dry-run
 | `--stop-after STAGE` | Stop once that stage finishes, for example `plan`. |
 | `--worktree` | Work in a separate git worktree. See [Worktree](#worktree). |
 | `--step` | Ask `y/N` after every stage, not only at the gates and after `plan`. |
+| `--headless` | Never read the terminal; ask on the issue instead. See [Headless](#headless). Not with `--step`. |
 
 The run asks `y/N` three times: at the two gates and after `plan`. At the gates it shows what you must review. After `plan` it shows `## Prerequisites` (what only you can supply, such as a captured fixture or a login), the phase titles, `## Assumptions` and `## Out of scope`, so you can supply them or decline before any code is written. Each prompt, and a run that stops, rings the terminal bell and on macOS shows a notification.
+
+## Headless
+
+```sh
+pipeline run --issue 42 --headless
+pipeline run --resume 42-add-a-dark-mode-toggle --headless
+pipeline revise 42-add-a-dark-mode-toggle "Confirm delete in a modal" --headless
+```
+
+With `--headless` the run never reads the terminal, so it can run with no one watching. Where it would ask you, it looks for your reply on the issue. If there is none, it posts a `request-<name>` comment that says what to reply, and exits. Reply, then run `pipeline run --resume <slug> --headless` to continue. Running it again without a reply posts nothing new.
+
+| Request | Asked when | Replies |
+|---|---|---|
+| `request-baseline` | The [preflight](#preflight) finds failing checks. The request lists them. | `/approve`, `/reject` |
+| `request-gate-a` | `decide` escalated questions that have no answer. | `Q<n>: <answer>`, `/approve` |
+| `request-plan` | `plan` is posted. | `/approve`, `/reject` |
+| `request-gate-b` | The PR text is posted and CI is green. | `/approve`, `/revise <feedback>`, `/reject` |
+| `request-allow` | A stage blocked after the agent was denied a command. The request lists the rules. | `/allow <rule>` |
+
+- Only replies from the repo owner, members and collaborators count. Anyone else's comment is ignored.
+- A reply is a comment that starts with the command. The first one posted after the request decides it. `/reject` stops the run at that point on every later run; delete your reply to be asked again.
+- **Gate A**: put one `Q<n>: <answer>` per line, where `<n>` is the question's number in the `decisions` comment. Start the answer with `!` when it changes an earlier decision; `decide` then reruns once. `/approve` accepts the recommendation of every question still open. Answers are written into the `decisions` comment, and the run continues once every escalated question has one. Editing the comment yourself works too.
+- **Gate B**: the request names the head commit. If the branch moves, the run deletes the request and posts a new one, so an earlier `/approve` never applies to newer code. `/revise <feedback>` runs [revise](#revise) and then asks again.
+- **Denied commands**: `/allow <rule>` replies are read from the issue at the start of every headless run, and the blocked stage runs again. Saving a rule to `.pipeline.json` is only possible in the terminal.
+- A proposed convention is never appended to `UX_CONVENTIONS.md`; it stays in the `revision-N` comment.
+- After `pipeline revise ... --headless` waits at Gate B, continue with `pipeline run --resume <slug> --headless`. Running `revise` again applies the feedback a second time.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Finished, or stopped for a reason other than a missing reply (a blocked stage, `/reject`, `--stop-after`). |
+| 1 | Error. |
+| 3 | Waiting for your reply. The last line names the request. |
 
 ## Worktree
 
@@ -161,7 +194,7 @@ Reads the stage comments on every issue in the repo and prints one row per run: 
 
 `--resume <slug>` skips every stage whose comment already exists. Re-running a stage edits its comment instead of adding a second one. Both gates are asked again.
 
-After a failed review, reply on the issue to accept a finding or confirm a manual check. On resume, the fix stage and the re-review read every reply posted after the `review.blocked` comment, and neither blocks on a finding you accepted.
+After a failed review, reply on the issue to accept a finding or confirm a manual check. On resume, the fix stage and the re-review read every reply posted after the `review.blocked` comment, and neither blocks on a finding you accepted. Replies after the `decisions` and `review.blocked` comments are read only when they come from the repo owner, a member or a collaborator.
 
 ## Cost controls
 
@@ -233,7 +266,7 @@ The skills are plain Markdown, so any agent can follow one if you point it at th
 - A target repo adds its own commands in `.pipeline.json` at its root, for example `{"allowedTools": ["Bash(make check:*)"]}`. These apply to writing stages only. When claude is denied a command anyway, the pipeline prints the command and this fix to stderr. If the stage then ends `blocked`, the run asks in the terminal whether to allow each denied command: `y` for the rest of this run, `a` to also save the rule to `.pipeline.json`, Enter to skip. After any approval the stage reruns instead of posting the `.blocked` comment.
 - The headless shell has no nvm. The pipeline reads the target repo's `.nvmrc` (root or one folder down), picks the newest matching `~/.nvm/versions/node/v<major>.*`, and puts its `bin` first on the agent's `PATH`; it stops if that version isn't installed. Set `PIPELINE_NODE_BIN` to override.
 - The CI check reads checks once none are pending, so a workflow that registers late can be missed. A repo whose workflows skip draft PRs shows no checks until Gate B marks the PR ready; the run then prints "No CI checks reported" and the check does not run after ready.
-- Not built: automatic continuation past the gates, a GitHub Actions trigger, and a Codex adapter.
+- Not built: automatic continuation past the gates, a GitHub Actions trigger that reruns a [headless](#headless) run when you reply, and a Codex adapter.
 
 ## Test
 
