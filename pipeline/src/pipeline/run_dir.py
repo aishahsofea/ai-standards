@@ -23,8 +23,9 @@ def check_artifact(name: str) -> None:
 
 
 class RunDir:
-    def __init__(self, repo: Path, slug: str) -> None:
-        self.repo = repo
+    def __init__(self, repo: Path, slug: str, work: Path | None = None) -> None:
+        """Run state lives under `repo`; `work` is where the code is changed, when that is a separate worktree."""
+        self.repo = work or repo
         self.slug = slug
         self.path = repo / ".agent" / "runs" / slug
         self.path.mkdir(parents=True, exist_ok=True)

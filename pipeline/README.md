@@ -21,7 +21,7 @@ python3 -m venv .venv
 
 ## Use
 
-Run from the repository you want to change. Its working tree must be clean.
+Run from the repository you want to change. Its working tree must be clean, unless you pass `--worktree`.
 
 ```sh
 pipeline run "Add a dark mode toggle"
@@ -37,9 +37,26 @@ pipeline run "Add a dark mode toggle" --dry-run
 | `--dry-run` | Use a fake agent and fake GitHub in a temp directory. Nothing is spent or pushed. |
 | `--repo PATH` | Target repository. Default: current directory. |
 | `--stop-after STAGE` | Stop once that stage finishes, for example `plan`. |
+| `--worktree` | Work in a separate git worktree. See [Worktree](#worktree). |
 | `--step` | Ask `y/N` after every stage, not only at the gates and after `plan`. |
 
 The run asks `y/N` three times: at the two gates and after `plan`. At the gates it shows what you must review. After `plan` it shows `## Prerequisites` (what only you can supply, such as a captured fixture or a login), the phase titles, `## Assumptions` and `## Out of scope`, so you can supply them or decline before any code is written. Each prompt, and a run that stops, rings the terminal bell and on macOS shows a notification.
+
+## Worktree
+
+```sh
+pipeline run "Add a dark mode toggle" --worktree
+```
+
+The run creates the branch in its own worktree at `~/.pipeline/worktrees/<repo>/<slug>` and does all its work there. Your checkout is not touched, need not be clean, and stays usable, so several runs can go at once. `--resume` and `revise` find the worktree from `state.json`, which stays in your checkout. Remove the worktree yourself after you merge: `git worktree remove <path>`.
+
+A new worktree has only tracked files, so say in `.pipeline.json` what else it needs:
+
+```json
+{"copy": [".env", "frontend/.env.local"], "setup": ["npm --prefix frontend ci", "python3 -m venv .venv", ".venv/bin/pip install -r requirements.txt"]}
+```
+
+`copy` lists untracked files or folders to copy from your checkout. `setup` lists commands run once in the new worktree, each one command with no shell features. A failing setup command stops the run and removes the new worktree and branch. With `checks` set, the [preflight](#preflight) then shows whether the worktree can run them. The pipeline reads `.pipeline.json` from your checkout, not the worktree.
 
 ## Preflight
 
