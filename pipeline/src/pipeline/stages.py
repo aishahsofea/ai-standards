@@ -6,11 +6,12 @@ from itertools import count
 from pathlib import Path
 from typing import Literal
 
-from pipeline.agent import Agent, Denial, Result
+from pipeline.agent import Agent, Result
 from pipeline.checks import CheckRun, baseline_report, failure_sections, known_failures
 from pipeline.cost import CostLedger
 from pipeline.forge import Check, Forge, ForgeError
 from pipeline.gates import GATES, PHASE_HEADING, plan_preview, read_feedback
+from pipeline.owner import CONVENTION, STEP, Owner
 from pipeline.run_dir import RunDir
 from pipeline.validate import analysis_problems, decisions_problems, plan_problems, proposed_convention, reference_problems
 
@@ -156,14 +157,11 @@ class Pipeline:
     agent_for: Callable[[Stage], Agent]
     skills_dir: Path
     idea: str
-    confirm: Callable[[str], bool]
+    owner: Owner
     show: Callable[[str], None]
     forge: Forge
     stop_after: str | None = None
     pause_each: bool = False
-    ask: Callable[[str], str] | None = None
-    approve: Callable[[tuple[Denial, ...]], bool] | None = None
-    notify: Callable[[str], None] = lambda _: None
     checks: Callable[[], list[CheckRun]] | None = None
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
@@ -222,8 +220,8 @@ class Pipeline:
         report = baseline_report(runs)
         self.show(report)
         if not all(run.ok for run in runs):
-            self.notify("preflight found failing checks")
-            if not self.confirm(BASELINE_QUESTION):
+            self.owner.notify("preflight found failing checks")
+            if not self.owner.confirm(BASELINE, BASELINE_QUESTION):
                 return False
         self.forge.post_artifact(BASELINE, report)
         return True
@@ -257,7 +255,7 @@ class Pipeline:
             report = self._blocked_report(stage, result.text)
             if not report and (problems := self._problems(stage, result.text)):
                 report = f"Status: blocked - the reply failed these checks:\n{bullets(problems)}\n\n{result.text}"
-        if report and self.approve and result.denials and self.approve(result.denials):
+        if report and result.denials and self.owner.approve(result.denials):
             return self._execute(stage, note)
         if report:
             blocked = f"{stage.name}.blocked"
@@ -299,7 +297,7 @@ class Pipeline:
         if not rule or (path.exists() and rule in path.read_text()):
             return
         self.show(f"Proposed convention for {CONVENTIONS_FILE}:\n- {rule}")
-        if self.confirm(f"Append it to {CONVENTIONS_FILE}?"):
+        if self.owner.confirm(CONVENTION, f"Append it to {CONVENTIONS_FILE}?"):
             existing = path.read_text() if path.exists() else ""
             if existing and not existing.endswith("\n"):
                 existing += "\n"
@@ -452,15 +450,16 @@ class Pipeline:
             self.show(gate.preview(artifact))
             if gate.publishes and (screenshots := self.run_dir.screenshots()):
                 self.show("Screenshots to review:\n" + bullets([str(path) for path in screenshots]))
-            self.notify(f"{stage.name} is waiting for your review")
-            if self.ask and gate.answer and (updated := gate.answer(artifact, self.ask)) != artifact:
+            self.owner.notify(f"{stage.name} is waiting for your review")
+            ask = self.owner.reader(gate.key)
+            if ask and gate.answer and (updated := gate.answer(artifact, ask)) != artifact:
                 self.forge.post_artifact(gate.artifact, updated)
                 if gate.needs_rerun(updated):
                     if self._execute(replace(stage, inputs=(*stage.inputs, gate.artifact)), REVISIT_NOTE) == "blocked":
                         return False
                     self.show(gate.preview(self._artifact(gate.artifact)))
-            approved = self.confirm(gate.message)
-            if not approved and gate.revisable and self.ask and (feedback := read_feedback(self.ask)):
+            approved = self.owner.confirm(gate.key, gate.message)
+            if not approved and gate.revisable and ask and (feedback := read_feedback(ask)):
                 return self.revise(feedback) is None
             if approved and (open_items := gate.unresolved(self._artifact(gate.artifact))):
                 self.show(f"{len(open_items)} escalated question(s) still have no answer; answer them, then --resume.")
@@ -468,11 +467,9 @@ class Pipeline:
             if approved and gate.publishes:
                 self.forge.finish(self._artifact(gate.artifact) + self._ci_fixes())
             return approved
-        if not ran:
-            return True
-        if stage.name == PLAN.name:
+        question = f"{stage.name} done. Continue?"
+        if ran and stage.name == PLAN.name:
             self.show(plan_preview(self._artifact(PLAN.output)))
-            self.notify("plan is waiting for your review")
-        elif not self.pause_each:
-            return True
-        return self.confirm(f"{stage.name} done. Continue?")
+            self.owner.notify("plan is waiting for your review")
+            return self.owner.confirm(PLAN.name, question)
+        return not (ran and self.pause_each) or self.owner.confirm(STEP, question)

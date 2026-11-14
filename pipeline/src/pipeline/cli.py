@@ -15,6 +15,7 @@ from pipeline.evals import render_results, run_evals, run_review_evals
 from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue, pipeline_issues
 from pipeline.gates import GateError, confirm
 from pipeline.node_bin import NodeNotFound, env_with_node, resolve_node_bin
+from pipeline.owner import TerminalOwner
 from pipeline.permissions import allowed_tools, ask_approvals, repo_checks
 from pipeline.run_dir import RunDir, slugify
 from pipeline.stages import CI_TIMEOUT_S, Pipeline
@@ -114,14 +115,11 @@ def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -
         print('No preflight: list the check commands under "checks" in .pipeline.json to run them before any change.', file=sys.stderr)
     budget = float(os.environ.get("BUDGET_USD", DEFAULT_BUDGET_USD))
     ledger = CostLedger(budget, prior_total(forge.read_artifact("cost")))
+    owner = TerminalOwner(lambda _: True) if args.dry_run else TerminalOwner(confirm, input, approve_denials, notify)
     pipeline = Pipeline(
-        run_dir, ledger, agent_for, SKILLS_DIR, state.idea,
-        (lambda _: True) if args.dry_run else confirm, print, forge, stop_after=getattr(args, "stop_after", None),
-        pause_each=getattr(args, "step", False),
-        ask=None if args.dry_run else input,
-        notify=(lambda _: None) if args.dry_run else notify,
+        run_dir, ledger, agent_for, SKILLS_DIR, state.idea, owner, print, forge,
+        stop_after=getattr(args, "stop_after", None), pause_each=getattr(args, "step", False),
         checks=(lambda: run_checks(commands, work, env_with_node(node_bin))) if commands else None,
-        approve=None if args.dry_run else approve_denials,
         ci_timeout_s=float(os.environ.get("CI_TIMEOUT_S", CI_TIMEOUT_S)),
     )
     return pipeline, run_dir, forge, ledger
@@ -138,7 +136,7 @@ def finish_run(pipeline: Pipeline, pipeline_run: Callable[[], str | None], run_d
         print(f"Finished; {spent}")
     else:
         print(f"Stopped at '{stopped}'; {spent}. Resume with: pipeline run --resume {slug}")
-        pipeline.notify(f"{slug} stopped at {stopped}")
+        pipeline.owner.notify(f"{slug} stopped at {stopped}")
     return 0
 
 
