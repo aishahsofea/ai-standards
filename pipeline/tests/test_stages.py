@@ -7,7 +7,7 @@ from pipeline.agent import Denial, FakeAgent, Result
 from pipeline.checks import CheckRun
 from pipeline.cost import BudgetExceeded, CostLedger
 from pipeline.forge import Check, FakeForge, ForgeError
-from pipeline.owner import TerminalOwner
+from pipeline.owner import HeadlessOwner, TerminalOwner
 from pipeline.run_dir import RunDir
 from pipeline.stages import ISSUE, Pipeline, phase_count, phase_stage
 
@@ -117,10 +117,11 @@ class Harness:
 
     def pipeline(self):
         options = dict(self.options)
-        owner = TerminalOwner(self.confirm, options.pop("ask"), options.pop("approve", None), options.pop("notify", lambda _: None))
+        terminal = TerminalOwner(self.confirm, options.pop("ask"), options.pop("approve", None), options.pop("notify", lambda _: None))
+        self.owner = HeadlessOwner(self.forge) if options.pop("headless", False) else terminal
         return Pipeline(
             self.run_dir, self.ledger, lambda stage: self.agent, self.tmp_path / "skills",
-            "an idea", owner, self.shown.append, self.forge, **options,
+            "an idea", self.owner, self.shown.append, self.forge, **options,
         )
 
     def called_stages(self):

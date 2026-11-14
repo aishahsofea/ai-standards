@@ -221,7 +221,7 @@ class Pipeline:
         self.show(report)
         if not all(run.ok for run in runs):
             self.owner.notify("preflight found failing checks")
-            if not self.owner.confirm(BASELINE, BASELINE_QUESTION):
+            if not self.owner.confirm(BASELINE, BASELINE_QUESTION, report):
                 return False
         self.forge.post_artifact(BASELINE, report)
         return True
@@ -468,7 +468,7 @@ class Pipeline:
                 self.forge.finish(self._artifact(gate.artifact) + self._ci_fixes())
             return approved
         question = f"{stage.name} done. Continue?"
-        if ran and stage.name == PLAN.name:
+        if stage.name == PLAN.name and (ran or self.owner.asks_on_resume):
             self.show(plan_preview(self._artifact(PLAN.output)))
             self.owner.notify("plan is waiting for your review")
             return self.owner.confirm(PLAN.name, question)
