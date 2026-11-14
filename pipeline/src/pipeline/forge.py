@@ -13,6 +13,7 @@ MARKER = re.compile(r"\A<!-- pipeline:artifact=(\S+) -->")
 EXCLUDE_RUNS = ":!.agent/runs"
 RETRY_DELAYS = (1, 2)
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
+QUOTED = re.compile(r"(?m)^>.*\n?")
 COMMAND = re.compile(r"/(approve|reject|revise|allow)(?!\S)\s*(.*)", re.DOTALL)
 
 
@@ -76,7 +77,7 @@ def request_name(key: str) -> str:
 
 
 def first_command(replies: list[str]) -> Decision | None:
-    matches = (COMMAND.match(reply.strip()) for reply in replies)
+    matches = (COMMAND.match(QUOTED.sub("", reply).strip()) for reply in replies)
     return next((Decision(match[1], match[2].strip()) for match in matches if match), None)
 
 
