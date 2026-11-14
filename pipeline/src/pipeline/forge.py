@@ -111,6 +111,12 @@ def fetch_issue(repo: Path, ref: str) -> Issue:
     return Issue(**json.loads(output))
 
 
+def pipeline_issues(repo: Path) -> list[dict]:
+    """Every issue in the repo with a stage comment, with its comments, oldest first."""
+    command = ("gh", "issue", "list", "--state", "all", "--search", "pipeline:artifact in:comments", "--limit", "500", "--json", "number,title,comments")
+    return sorted(json.loads(run_command(command, repo, retry=True)), key=lambda issue: issue["number"])
+
+
 @dataclass
 class RunState:
     idea: str
