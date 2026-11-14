@@ -22,6 +22,7 @@ Fix what the review found and nothing else. Headless (the prompt says to run non
 - Never weaken, skip, or delete a test to make it pass.
 - If you think a finding is wrong, do not fix it: say why under Not fixed. The review reruns and decides.
 - Do not commit, push, or open a PR; the pipeline does that.
+- A failure shown in `baseline.md`, when that file is among the inputs, was there before this branch. Report it as pre-existing; it does not make the status `blocked`.
 
 ## Excuses to reject
 

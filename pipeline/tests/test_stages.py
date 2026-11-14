@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from pipeline.agent import Denial, FakeAgent, Result
+from pipeline.checks import CheckRun
 from pipeline.cost import BudgetExceeded, CostLedger
 from pipeline.forge import Check, FakeForge, ForgeError
 from pipeline.run_dir import RunDir
@@ -193,6 +194,42 @@ def test_notifies_at_each_prompt(tmp_path):
     h = Harness(tmp_path, notify=notes.append)
     h.pipeline().run()
     assert [note.split()[0] for note in notes] == ["decide", "plan", "docs"]
+
+
+def prompts_for(h, skill):
+    return [call[0] for call in h.agent.calls if f"/{skill}/SKILL.md" in call[0]]
+
+
+def test_preflight_posts_a_passing_baseline_without_asking(tmp_path):
+    h = Harness(tmp_path, checks=lambda: [CheckRun("pytest", True)])
+    h.pipeline().run()
+    assert "Every check passed" in h.forge.artifacts["baseline"]
+    assert not [q for q in h.questions if q.startswith("These checks fail")]
+    assert h.forge.posts.index("baseline") < h.forge.posts.index("analysis")
+
+
+def test_declining_a_failing_baseline_stops_before_analyze(tmp_path):
+    h = Harness(tmp_path, checks=lambda: [CheckRun("pytest", False, "9 failed")], answers=lambda q: not q.startswith("These checks fail"))
+    assert h.pipeline().run() == "preflight"
+    assert h.called_stages() == ["issue"]
+    assert "9 failed" in h.shown[-1] and "baseline" not in h.forge.artifacts
+
+
+def test_accepted_baseline_failures_reach_the_stages_that_run_checks(tmp_path):
+    h = Harness(tmp_path, checks=lambda: [CheckRun("pytest", False, "9 failed")])
+    h.pipeline().run()
+    for skill in ("implement-phase", "test"):
+        assert "9 failed" in staged(prompts_for(h, skill)[0], "baseline")
+    for skill in ("plan", "review", "docs"):
+        assert "/baseline.md" not in prompts_for(h, skill)[0]
+
+
+def test_preflight_does_not_run_once_analysis_exists(tmp_path):
+    ran = []
+    h = Harness(tmp_path, checks=lambda: ran.append(1) or [CheckRun("pytest", True)])
+    h.forge.artifacts.update(issue="# T", analysis=ANALYSIS)
+    h.pipeline().run()
+    assert not ran and "baseline" not in h.forge.artifacts
 
 
 def test_plan_prompt_shows_preview_and_declining_stops(tmp_path):

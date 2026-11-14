@@ -8,13 +8,14 @@ from collections.abc import Callable
 from pathlib import Path
 
 from pipeline.agent import AgentError, Denial, FakeAgent
+from pipeline.checks import run_checks
 from pipeline.claude_agent import ClaudeAgent
 from pipeline.cost import DEFAULT_BUDGET_USD, BudgetExceeded, CostLedger, prior_total, render_table
 from pipeline.evals import render_results, run_evals, run_review_evals
 from pipeline.forge import FakeForge, Forge, ForgeError, GitHubForge, RunState, fetch_issue
 from pipeline.gates import GateError, confirm
-from pipeline.node_bin import NodeNotFound, resolve_node_bin
-from pipeline.permissions import allowed_tools, ask_approvals
+from pipeline.node_bin import NodeNotFound, env_with_node, resolve_node_bin
+from pipeline.permissions import allowed_tools, ask_approvals, repo_checks
 from pipeline.run_dir import RunDir, slugify
 from pipeline.stages import CI_TIMEOUT_S, Pipeline
 
@@ -94,6 +95,9 @@ def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -
         (lambda stage: fake_agent) if args.dry_run
         else (lambda stage: ClaudeAgent(repo, stage.max_turns, AGENT_TIMEOUT_S, stage.read_only, (SKILLS_DIR, run_dir.staging), node_bin, (*allowed_tools(repo, stage.read_only), *approved)))
     )
+    commands = () if args.dry_run else repo_checks(repo)
+    if not (commands or args.dry_run):
+        print('No preflight: list the check commands under "checks" in .pipeline.json to run them before any change.', file=sys.stderr)
     budget = float(os.environ.get("BUDGET_USD", DEFAULT_BUDGET_USD))
     ledger = CostLedger(budget, prior_total(forge.read_artifact("cost")))
     pipeline = Pipeline(
@@ -102,6 +106,7 @@ def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -
         pause_each=getattr(args, "step", False),
         ask=None if args.dry_run else input,
         notify=(lambda _: None) if args.dry_run else notify,
+        checks=(lambda: run_checks(commands, repo, env_with_node(node_bin))) if commands else None,
         approve=None if args.dry_run else approve_denials,
         ci_timeout_s=float(os.environ.get("CI_TIMEOUT_S", CI_TIMEOUT_S)),
     )
