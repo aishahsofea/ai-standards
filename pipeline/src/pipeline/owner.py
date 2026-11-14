@@ -27,6 +27,7 @@ class Owner(Protocol):
     """The person who decides at each ask point; `key` names the ask point."""
 
     asks_on_resume: bool
+    waiting: str | None
 
     def confirm(self, key: str, question: str, details: str = "") -> bool: ...
     def reader(self, key: str) -> Callable[[str], str] | None: ...
@@ -41,6 +42,7 @@ class TerminalOwner:
     allow: Callable[[tuple[Denial, ...]], bool] | None = None
     alert: Callable[[str], None] = lambda _: None
     asks_on_resume = False
+    waiting = None
 
     def confirm(self, key: str, question: str, details: str = "") -> bool:
         return self.ask_yes_no(question)
