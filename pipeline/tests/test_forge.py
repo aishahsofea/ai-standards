@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.forge import Check, FakeForge, ForgeError, GitHubForge, Issue, RunState, fetch_issue
+from pipeline.forge import Check, Decision, FakeForge, ForgeError, GitHubForge, Issue, RunState, fetch_issue
 
 
 class Shell:
@@ -174,9 +174,9 @@ def test_fetch_issue_parses_gh_json(make):
 ISSUE_URL = "https://github.com/o/r/issues/7"
 
 
-def comment(name, text="body", id=101):
+def comment(name, text="body", id=101, association="OWNER"):
     body = f"<!-- pipeline:artifact={name} -->\n\n## {name.title()}\n\n{text}" if name else text
-    return {"url": f"{ISSUE_URL}#issuecomment-{id}", "body": body}
+    return {"url": f"{ISSUE_URL}#issuecomment-{id}", "body": body, "authorAssociation": association}
 
 
 @pytest.fixture
@@ -275,6 +275,63 @@ def test_human_comments_after_an_artifact(issue_forge):
     ]
     assert forge.human_comments_after("decisions") == ["use sqlite"]
     assert forge.human_comments_after("analysis") == []
+
+
+def test_human_comments_from_non_collaborators_are_ignored(issue_forge):
+    forge, _, comments = issue_forge
+    comments += [
+        comment("decisions", id=1), comment(None, "drive-by", 2, "NONE"), comment(None, "past contributor", 3, "CONTRIBUTOR"),
+        comment(None, "member", 4, "MEMBER"), comment(None, "collaborator", 5, "COLLABORATOR"),
+    ]
+    assert forge.human_comments_after("decisions") == ["member", "collaborator"]
+
+
+def test_request_posts_a_request_comment(issue_forge):
+    forge, shell, _ = issue_forge
+    forge.request("plan", "plan done. Continue?")
+    (posted,) = shell.ran("gh", "issue", "comment")
+    assert posted[-1].startswith("<!-- pipeline:artifact=request-plan -->") and "plan done. Continue?" in posted[-1]
+
+
+def test_decision_is_the_first_command_reply_after_the_request(issue_forge):
+    forge, _, comments = issue_forge
+    comments += [
+        comment(None, "/approve", 1), comment("request-plan", id=2), comment(None, "looks fine to me", 3),
+        comment(None, "/reject", 4), comment(None, "/approve", 5),
+    ]
+    assert forge.decision("plan") == Decision("reject")
+
+
+def test_decision_keeps_the_text_after_the_command(issue_forge):
+    forge, _, comments = issue_forge
+    comments += [comment("request-gate-b", id=1), comment(None, "/revise Use a modal\n\nnot inline", 2)]
+    assert forge.decision("gate-b") == Decision("revise", "Use a modal\n\nnot inline")
+
+
+def test_decision_ignores_non_collaborators(issue_forge):
+    forge, _, comments = issue_forge
+    comments += [comment("request-plan", id=1), comment(None, "/approve", 2, "NONE")]
+    assert forge.decision("plan") is None
+
+
+def test_no_decision_without_a_request_or_a_command(issue_forge):
+    forge, _, comments = issue_forge
+    comments += [comment(None, "/approve", 1)]
+    assert forge.decision("plan") is None
+    comments += [comment("request-plan", id=2), comment(None, "/approved by me", 3), comment(None, "see /approve", 4)]
+    assert forge.decision("plan") is None
+
+
+def test_fake_forge_decides_from_trusted_replies_after_the_request():
+    forge = FakeForge()
+    forge.reply("/reject")
+    forge.request("plan", "Continue?")
+    assert forge.read_artifact("request-plan") == "Continue?" and forge.decision("plan") is None
+    forge.reply("/approve", "NONE")
+    assert forge.decision("plan") is None and forge.human_comments_after("plan") == ["/reject"]
+    forge.reply("/allow Bash(docker ps:*)")
+    forge.reply("/approve")
+    assert forge.decision("plan") == Decision("allow", "Bash(docker ps:*)")
 
 
 def test_fake_forge_round_trip_and_validation():
