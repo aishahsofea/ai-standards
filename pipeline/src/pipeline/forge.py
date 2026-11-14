@@ -91,6 +91,8 @@ class Forge(Protocol):
     def human_comments_after(self, name: str) -> list[str]: ...
     def request(self, key: str, text: str) -> None: ...
     def decision(self, key: str) -> Decision | None: ...
+    def withdraw(self, key: str) -> None: ...
+    def head(self) -> str: ...
     def ci_checks(self) -> list[Check] | None: ...
     def ci_logs(self, failing: list[Check]) -> str: ...
     def base_failures(self) -> set[str]: ...
@@ -163,6 +165,7 @@ class FakeForge:
         self.posts: list[str] = []
         self.replies: list[str] = []
         self.requested_at: dict[str, int] = {}
+        self.head_commit = "c0ffee"
         self.ci_results: list[list[Check] | None] = [[Check("ci", "pass")]]
         self.on_base: set[str] = set()
 
@@ -203,6 +206,13 @@ class FakeForge:
 
     def decision(self, key: str) -> Decision | None:
         return first_command(self.replies[self.requested_at[key] :]) if key in self.requested_at else None
+
+    def withdraw(self, key: str) -> None:
+        self.calls.append(("withdraw", key))
+        del self.artifacts[request_name(key)], self.requested_at[key]
+
+    def head(self) -> str:
+        return self.head_commit
 
     def ci_checks(self) -> list[Check] | None:
         return self.ci_results.pop(0) if len(self.ci_results) > 1 else self.ci_results[0]
@@ -269,9 +279,7 @@ class GitHubForge:
             raise ForgeError(f"no issue yet to post the '{name}' comment on")
         existing = self._artifact_comments().get(name)
         if existing:
-            comment_id = existing["url"].rsplit("-", 1)[1]
-            repo = "/".join(self.state.issue_url.split("/")[3:5])
-            self._run("gh", "api", "-X", "PATCH", f"repos/{repo}/issues/comments/{comment_id}", "-f", f"body={body}")
+            self._run("gh", "api", "-X", "PATCH", self._comment_endpoint(existing), "-f", f"body={body}")
         else:
             self._run("gh", "issue", "comment", self.state.issue_url, "--body", body)
         self._view = None
@@ -303,13 +311,21 @@ class GitHubForge:
     def decision(self, key: str) -> Decision | None:
         return first_command(self.human_comments_after(request_name(key)))
 
+    def withdraw(self, key: str) -> None:
+        if comment := self._artifact_comments().get(request_name(key)):
+            self._run("gh", "api", "-X", "DELETE", self._comment_endpoint(comment))
+            self._view = None
+
+    def head(self) -> str:
+        return self._run("git", "rev-parse", "HEAD")
+
     def ci_checks(self) -> list[Check] | None:
         """None until GitHub reports the local HEAD as the PR head."""
         if not self.state.pr_url:
             return []
         output = self._run("gh", "pr", "view", self.state.pr_url, "--json", "headRefOid,statusCheckRollup", retry=True)
         view = json.loads(output)
-        if view["headRefOid"] != self._run("git", "rev-parse", "HEAD"):
+        if view["headRefOid"] != self.head():
             return None
         return [check_from_rollup(entry) for entry in view["statusCheckRollup"]]
 
@@ -354,6 +370,10 @@ class GitHubForge:
             if name := self._artifact_name(comment):
                 found.setdefault(name, comment)
         return found
+
+    def _comment_endpoint(self, comment: dict) -> str:
+        repo = "/".join(self.state.issue_url.split("/")[3:5])
+        return f"repos/{repo}/issues/comments/{comment['url'].rsplit('-', 1)[1]}"
 
     @staticmethod
     def _artifact_name(comment: dict) -> str | None:

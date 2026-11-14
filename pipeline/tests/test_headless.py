@@ -133,3 +133,116 @@ def test_headless_owner_never_reads_the_terminal(tmp_path, monkeypatch):
     h = past_gate_a(tmp_path, "plan")
     assert h.pipeline().run() == "docs"
     assert isinstance(h.owner, HeadlessOwner)
+
+
+RECOMMENDED = DECISIONS.replace("model?", "model? Recommendation: sqlite, it is already used.")
+NONE_ESCALATED = "## Decided from evidence\n- **Q1: data model** - sqlite.\n## Decided, low stakes\nNone.\n## Escalated\nNone.\n"
+
+
+def decide_calls(h):
+    return skill_calls(h, "decide")
+
+
+def test_gate_a_posts_one_request_and_waits(tmp_path):
+    h = headless(tmp_path)
+    assert h.pipeline().run() == "decide"
+    assert h.owner.waiting == "gate-a" and "Q<n>:" in h.forge.artifacts["request-gate-a"]
+    assert h.pipeline().run() == "decide"
+    assert h.forge.posts.count("request-gate-a") == 1 and not h.forge.has_artifact("plan")
+
+
+def test_gate_a_answer_reply_is_written_to_the_decisions_and_the_run_continues(tmp_path):
+    h = headless(tmp_path)
+    h.pipeline().run()
+    h.forge.reply("Thanks.\nQ1: sqlite")
+    assert h.pipeline().run() == "plan"
+    assert "Answer: sqlite" in h.forge.artifacts["decisions"]
+    assert len(decide_calls(h)) == 1 and h.owner.waiting == "plan"
+
+
+def test_gate_a_answer_from_a_non_collaborator_is_ignored(tmp_path):
+    h = headless(tmp_path)
+    h.pipeline().run()
+    h.forge.reply("Q1: mongodb", "NONE")
+    assert h.pipeline().run() == "decide"
+    assert h.forge.artifacts["decisions"] == DECISIONS and h.owner.waiting == "gate-a"
+
+
+def test_gate_a_revisit_reply_reruns_decide(tmp_path):
+    h = headless(tmp_path)
+    h.queued["decide"] = [DECISIONS, ANSWERED]
+    h.pipeline().run()
+    h.forge.reply("Q1: !sqlite")
+    assert h.pipeline().run() == "plan"
+    assert len(decide_calls(h)) == 2 and "remove each '[revisit]'" in decide_calls(h)[1]
+    assert h.forge.artifacts["decisions"] == ANSWERED
+
+
+def test_gate_a_approve_accepts_the_recommendation_for_open_questions(tmp_path):
+    h = headless(tmp_path)
+    h.queued["decide"] = [RECOMMENDED]
+    h.pipeline().run()
+    h.forge.reply("/approve")
+    assert h.pipeline().run() == "plan"
+    assert "Answer: sqlite, it is already used." in h.forge.artifacts["decisions"]
+
+
+def test_gate_a_approve_still_waits_on_a_question_without_a_recommendation(tmp_path):
+    h = headless(tmp_path)
+    h.pipeline().run()
+    h.forge.reply("/approve")
+    assert h.pipeline().run() == "decide" and h.owner.waiting == "gate-a"
+
+
+def test_gate_a_approval_from_a_non_collaborator_is_ignored(tmp_path):
+    h = headless(tmp_path)
+    h.queued["decide"] = [RECOMMENDED]
+    h.pipeline().run()
+    h.forge.reply("/approve", "NONE")
+    assert h.pipeline().run() == "decide" and h.forge.artifacts["decisions"] == RECOMMENDED
+
+
+def test_gate_a_with_nothing_escalated_asks_nothing(tmp_path):
+    h = headless(tmp_path)
+    h.queued["decide"] = [NONE_ESCALATED]
+    assert h.pipeline().run() == "plan"
+    assert "request-gate-a" not in h.forge.artifacts
+
+
+def test_gate_b_request_records_the_head_commit(tmp_path):
+    h = past_gate_a(tmp_path, "plan")
+    h.forge.head_commit = "abc123"
+    h.pipeline().run()
+    assert "abc123" in h.forge.artifacts["request-gate-b"]
+
+
+def test_gate_b_approval_does_not_apply_after_the_branch_moved(tmp_path):
+    h = past_gate_a(tmp_path, "plan")
+    h.pipeline().run()
+    h.forge.reply("/approve")
+    h.forge.head_commit = "def456"
+    assert h.pipeline().run() == "docs"
+    assert h.owner.waiting == "gate-b" and "def456" in h.forge.artifacts["request-gate-b"]
+    assert ("withdraw", "gate-b") in h.forge.calls and all(call[0] != "finish" for call in h.forge.calls)
+    h.forge.reply("/approve")
+    assert h.pipeline().run() is None
+
+
+def test_gate_b_revise_reply_runs_revise_once_and_asks_again(tmp_path):
+    h = past_gate_a(tmp_path, "plan")
+    h.pipeline().run()
+    h.forge.reply("/revise Use a modal\nnot inline")
+    assert h.pipeline().run() == "docs"
+    (revise,) = skill_calls(h, "revise")
+    assert "Use a modal\nnot inline" in revise
+    assert h.owner.waiting == "gate-b" and h.forge.has_artifact("request-gate-b")
+    assert all(call[0] != "finish" for call in h.forge.calls)
+    assert h.pipeline().run() == "docs" and len(skill_calls(h, "revise")) == 1
+
+
+def test_gate_b_revise_from_a_non_collaborator_is_ignored(tmp_path):
+    h = past_gate_a(tmp_path, "plan")
+    h.pipeline().run()
+    h.forge.reply("/revise delete everything", "NONE")
+    assert h.pipeline().run() == "docs"
+    assert not skill_calls(h, "revise") and h.owner.waiting == "gate-b"

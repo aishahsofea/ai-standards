@@ -322,6 +322,30 @@ def test_no_decision_without_a_request_or_a_command(issue_forge):
     assert forge.decision("plan") is None
 
 
+def test_withdraw_deletes_the_request_comment(issue_forge):
+    forge, shell, comments = issue_forge
+    comments.append(comment("request-gate-b", id=77))
+    forge.withdraw("gate-b")
+    assert shell.ran("gh", "api", "-X", "DELETE") == [("gh", "api", "-X", "DELETE", "repos/o/r/issues/comments/77")]
+    forge.withdraw("plan")
+    assert len(shell.ran("gh", "api", "-X", "DELETE")) == 1
+
+
+def test_head_is_the_local_commit(make):
+    forge, _, _ = make(**{"git_rev-parse": "abc123"})
+    assert forge.head() == "abc123"
+
+
+def test_fake_forge_withdrawn_request_forgets_its_replies():
+    forge = FakeForge()
+    forge.request("gate-b", "Ready?")
+    forge.reply("/approve")
+    forge.withdraw("gate-b")
+    assert not forge.has_artifact("request-gate-b")
+    forge.request("gate-b", "Ready?")
+    assert forge.decision("gate-b") is None
+
+
 def test_fake_forge_decides_from_trusted_replies_after_the_request():
     forge = FakeForge()
     forge.reply("/reject")
