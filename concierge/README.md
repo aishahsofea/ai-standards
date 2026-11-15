@@ -40,6 +40,8 @@ A voice note from you is handled as if you had typed what it says. It is off unt
 
 For each run the concierge starts, the pipeline is run with `--events <home>/logs/<repo>-<slug>.events.jsonl`. After each poll the concierge reads the new complete lines, remembers the byte offset in `state.json` (so a restart never repeats a message) and sends one short message without a notification sound for `plan-posted` ("plan posted"), `ci-green` ("CI green") and `blocked` ("blocked: <stage>"). Other events are ignored. These messages never carry buttons, create nothing a reply can attach to and post nothing to the issue. A malformed line is skipped; a half-written last line waits until it ends with a newline.
 
+When a run stops at a stage that posted a `<stage>.blocked` report, the stop message adds the report's status line, its `Unblock:` line if it has one, and a link to the comment. A message sent while nothing is waiting repeats that for every stopped run.
+
 ## Modules
 
 | Module | Role |

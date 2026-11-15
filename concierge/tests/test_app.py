@@ -660,3 +660,23 @@ def test_a_spoken_stop_still_asks_to_confirm(w):
     w.supervisor.resume(RUN)
     w.hear("Stop.")
     assert "stop this run?" in w.chat.last[1] and not w.spawn.processes[0].interrupted
+
+
+BLOCKED = "Status: blocked - missing prerequisite `frontend/.env.local`\n\n**Deviations**\n- I did not copy it.\n- Unblock: put `frontend/.env.local` into the worktree, then rerun Phase 6.\n"
+
+
+def test_a_blocked_stop_says_why_and_how_to_unblock_and_a_later_message_repeats_it(w):
+    w.supervisor.resume(RUN)
+    report = w.issue().artifact("implement-phase-6.blocked", BLOCKED)
+    w.finish(RUN, 0, status="stopped", stage="implement-phase-6", spent_usd=4.03)
+    stop = w.chat.last[1]
+    assert "stopped at implement-phase-6" in stop and "Status: blocked - missing prerequisite `frontend/.env.local`" in stop
+    assert "Unblock: put `frontend/.env.local` into the worktree, then rerun Phase 6." in stop and f"issuecomment-{report}" in stop
+    w.say("why is it blocked?")
+    assert "Nothing is waiting" in w.chat.last[1] and "missing prerequisite" in w.chat.last[1] and w.interpreter.calls == []
+
+
+def test_a_stop_without_a_report_says_only_where(w):
+    w.supervisor.resume(RUN)
+    w.finish(RUN, 0, status="stopped", stage="plan", spent_usd=1.0)
+    assert w.chat.last[1] == "shop/dark-mode stopped at plan. Spent $1.00 in all."

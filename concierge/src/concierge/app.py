@@ -14,7 +14,7 @@ from concierge.interpreter import UNCLEAR, ClaudeInterpreter, Interpreter
 from concierge.issue import GitHubIssue
 from concierge.notifier import Choice, build_prompt
 from concierge.poster import Gateway, Poster, Refused
-from concierge.requests import Request, decision_on, find_request, open_questions
+from concierge.requests import Request, blocked_note, decision_on, find_request, open_questions
 from concierge.state import Bound, Message, RunId, State
 from concierge.supervisor import Outcome, Progress, Supervisor, run_budget, spawn_local
 from concierge.telegram import TelegramChat, bot_download, bot_http
@@ -107,12 +107,14 @@ class Concierge:
                     self._say(f"{run} is waiting at '{outcome.request}' but the request is not on the issue.")
                 continue
             self.state.drop_messages(str(run))
-            spent = f"${self.state.runs[str(run)].spent_usd:.2f}"
+            record = self.state.runs[str(run)]
+            spent = f"${record.spent_usd:.2f}"
             match outcome.status:
                 case "finished":
                     self._say(f"{run} finished. Spent {spent} in all.")
                 case "stopped":
-                    self._say(f"{run} {outcome.detail or f'stopped at {outcome.stage}'}. Spent {spent} in all.")
+                    record.note = blocked_note(self.gateway_for(run).comments(), outcome.stage) if outcome.stage and not outcome.detail else ""
+                    self._say("\n\n".join(filter(None, [f"{run} {outcome.detail or f'stopped at {outcome.stage}'}. Spent {spent} in all.", record.note])))
                 case "capped":
                     self._say(f"{run} was not started: {outcome.detail}.")
                 case _:
@@ -158,8 +160,12 @@ class Concierge:
         waiting = self._waiting()
         if len(waiting) == 1:
             return next(iter(waiting.values()))
-        self._say(f"Several runs are waiting: {', '.join(waiting)}. Reply to the message you mean." if waiting else "Nothing is waiting for a decision, so nothing was posted.")
+        self._say(f"Several runs are waiting: {', '.join(waiting)}. Reply to the message you mean." if waiting else self._nothing_waiting())
         return None
+
+    def _nothing_waiting(self) -> str:
+        stops = [f"{name} is stopped.\n{record.note}" for name, record in self.state.runs.items() if record.status == "stopped" and record.note]
+        return "\n\n".join(["Nothing is waiting for a decision, so nothing was posted.", *stops])
 
     def _text(self, event: Event, spoken: bool = False) -> None:
         text = event.text.strip()

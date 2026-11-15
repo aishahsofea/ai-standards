@@ -4,8 +4,10 @@ from dataclasses import dataclass
 
 from pipeline.forge import MARKER, TRUSTED, Decision, comment_text, first_command, request_name
 from pipeline.gates import GateError, escalated_entries
+from pipeline.stats import reason
 
 HEAD = re.compile(r"Head commit: `([0-9a-f]+)`")
+UNBLOCK = re.compile(r"(?mi)^[-*\s]*Unblock:\s*(.+)$")
 RULE = re.compile(r"(?m)^- `/allow (.+)`$")
 QUESTION_NUMBER = re.compile(r"(?:(\d+)[.)]|\*\*Q(\d+))")
 QUESTION_PREFIX = re.compile(r"^(?:\d+[.)]\s+|\*\*Q\d+[^*]*\*\*:?\s*)")
@@ -48,6 +50,17 @@ class Request:
 def artifact_text(comments: list[Comment], name: str) -> str | None:
     comment = next((c for c in comments if c.artifact == name), None)
     return comment_text(name, comment.body) if comment else None
+
+
+def blocked_note(comments: list[Comment], stage: str) -> str:
+    """Why the stage stopped and how to unblock it, from its report, with a link; empty when it posted none."""
+    name = f"{stage}.blocked"
+    comment = next((c for c in comments if c.artifact == name), None)
+    if comment is None:
+        return ""
+    text = comment_text(name, comment.body)
+    unblock = UNBLOCK.search(text)
+    return "\n".join([reason(text), *([f"Unblock: {unblock[1].strip()}"] if unblock else []), comment.url])
 
 
 def find_request(comments: list[Comment], key: str) -> Request | None:
