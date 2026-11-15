@@ -660,3 +660,50 @@ def test_a_spoken_stop_still_asks_to_confirm(w):
     w.supervisor.resume(RUN)
     w.hear("Stop.")
     assert "stop this run?" in w.chat.last[1] and not w.spawn.processes[0].interrupted
+
+
+BLOCKED = "Status: blocked - missing prerequisite `frontend/.env.local`\n\n**Deviations**\n- I did not copy it.\n- Unblock: put `frontend/.env.local` into the worktree, then rerun Phase 6.\n"
+
+
+def test_a_blocked_stop_says_why_and_how_to_unblock_and_a_later_message_repeats_it(w):
+    w.supervisor.resume(RUN)
+    report = w.issue().artifact("implement-phase-6.blocked", BLOCKED)
+    w.finish(RUN, 0, status="stopped", stage="implement-phase-6", spent_usd=4.03)
+    stop = w.chat.last[1]
+    assert "stopped at implement-phase-6" in stop and "Status: blocked - missing prerequisite `frontend/.env.local`" in stop
+    assert "Unblock: put `frontend/.env.local` into the worktree, then rerun Phase 6." in stop and f"issuecomment-{report}" in stop
+    w.say("why is it blocked?")
+    assert "Nothing is waiting" in w.chat.last[1] and "missing prerequisite" in w.chat.last[1] and w.interpreter.calls == []
+
+
+def test_a_stop_without_a_report_says_only_where(w):
+    w.supervisor.resume(RUN)
+    w.finish(RUN, 0, status="stopped", stage="plan", spent_usd=1.0)
+    assert w.chat.last[1] == "shop/dark-mode stopped at plan. Spent $1.00 in all."
+
+
+def test_resume_confirms_then_reruns_a_stopped_run(w):
+    w.supervisor.resume(RUN)
+    w.issue().artifact("implement-phase-6.blocked", BLOCKED)
+    w.finish(RUN, 0, status="stopped", stage="implement-phase-6")
+    assert "send `resume`" in w.chat.last[1]
+    w.say("resume")
+    assert "shop/dark-mode: resume this run?" in w.chat.last[1] and w.runs_started == 1
+    w.click("confirm", w.chat.last)
+    assert w.runs_started == 2 and w.spawn.processes[1].argv[2:4] == ["--resume", "dark-mode"] and "Resumed shop/dark-mode" in w.chat.last[1]
+
+
+def test_resume_with_several_stopped_names_them(w):
+    for run in (RUN, OTHER):
+        w.supervisor.resume(run)
+        w.finish(run, 0, status="stopped", stage="plan")
+    w.say("resume")
+    assert "resume shop/dark-mode" in w.chat.last[1] and "resume shop/export-csv" in w.chat.last[1]
+    w.say("resume shop/export-csv")
+    w.click("confirm", w.chat.last)
+    assert "--resume" in w.spawn.processes[-1].argv and "export-csv" in w.spawn.processes[-1].argv
+
+
+def test_resume_with_nothing_stopped_says_so(w):
+    w.say("resume")
+    assert w.chat.last[1] == "No run is stopped." and w.runs_started == 0

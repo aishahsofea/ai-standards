@@ -43,6 +43,7 @@ class RunRecord:
     request: str = ""
     spent_usd: float = 0.0
     events_offset: int = 0
+    note: str = ""
 
 
 @dataclass

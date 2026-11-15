@@ -40,6 +40,8 @@ A voice note from you is handled as if you had typed what it says. It is off unt
 
 For each run the concierge starts, the pipeline is run with `--events <home>/logs/<repo>-<slug>.events.jsonl`. After each poll the concierge reads the new complete lines, remembers the byte offset in `state.json` (so a restart never repeats a message) and sends one short message without a notification sound for `plan-posted` ("plan posted"), `ci-green` ("CI green") and `blocked` ("blocked: <stage>"). Other events are ignored. These messages never carry buttons, create nothing a reply can attach to and post nothing to the issue. A malformed line is skipped; a half-written last line waits until it ends with a newline.
 
+When a run stops at a stage that posted a `<stage>.blocked` report, the stop message adds the report's status line, its `Unblock:` line if it has one, and a link to the comment. A message sent while nothing is waiting repeats that for every stopped run.
+
 ## Modules
 
 | Module | Role |
@@ -62,7 +64,7 @@ Tests use `tests/fakes.py` (`FakeIssue`, `FakeSpawn`, `FakeProcess`) and the fak
 ## Behaviour worth knowing
 
 - Chat adapters implement `Chat`. `send(..., silent=True)` sends without a notification sound. A voice note is `Event("voice", audio=<bytes>, message_id=...)`, or with `audio` empty and `text` giving the reason it could not be fetched. A button click is `Event("button", data=..., message_id=<message the button was on>)`; free text is `Event("text", text=..., message_id=<replied-to message or None>)`. `Choice.data` is one of `approve`, `reject`, `revise`, `allow:<i>`, `confirm`, `cancel`.
-- `status`, `cost`, `stop [repo/slug]` and `undo` are matched in code before any model call. `status` groups runs by repo with each run's spend; `cost` shows today's spend against the daily cap and per-run totals.
+- `status`, `cost`, `stop [repo/slug]`, `resume [repo/slug]` and `undo` are matched in code before any model call. `status` groups runs by repo with each run's spend; `cost` shows today's spend against the daily cap and per-run totals. `resume` reruns a stopped, failed or capped run after a Confirm; a restart only resumes runs that were interrupted.
 - A free-text message that is not a reply and not feedback first goes through `Interpreter.start_intent`, which returns `start`, `other` or `unclear` plus a configured repo name (or empty) and an idea. The model never writes text the user sees.
   - `start` shows a code-rendered confirm with the repo, the idea, the per-run budget (`BUDGET_USD`, default from `pipeline.cost`) and the remaining daily cap. Nothing runs until Confirm. A missing, unknown or ambiguous repo is asked with one button per configured repo.
   - A slug that already exists, an idea starting with `-` (the pipeline would read it as an option) and a reached daily cap are refused with a message, before the confirm and again on Confirm.

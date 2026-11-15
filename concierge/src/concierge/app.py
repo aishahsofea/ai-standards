@@ -14,7 +14,7 @@ from concierge.interpreter import UNCLEAR, ClaudeInterpreter, Interpreter
 from concierge.issue import GitHubIssue
 from concierge.notifier import Choice, build_prompt
 from concierge.poster import Gateway, Poster, Refused
-from concierge.requests import Request, decision_on, find_request, open_questions
+from concierge.requests import Request, blocked_note, decision_on, find_request, open_questions
 from concierge.state import Bound, Message, RunId, State
 from concierge.supervisor import Outcome, Progress, Supervisor, run_budget, spawn_local
 from concierge.telegram import TelegramChat, bot_download, bot_http
@@ -27,6 +27,7 @@ APPROVALS_NEEDING_CONFIRM = {"plan", "gate-b"}
 NO_STAGE = Bound("", 0, "")
 START_RUN = ""
 BUTTON_ONLY = {"confirm", "pick-repo"}
+RESUMABLE_BY_HAND = {"stopped", "error", "capped"}
 PROGRESS_TEXT = {"plan-posted": "plan posted", "ci-green": "CI green", "blocked": "blocked: {stage}"}
 
 
@@ -107,12 +108,15 @@ class Concierge:
                     self._say(f"{run} is waiting at '{outcome.request}' but the request is not on the issue.")
                 continue
             self.state.drop_messages(str(run))
-            spent = f"${self.state.runs[str(run)].spent_usd:.2f}"
+            record = self.state.runs[str(run)]
+            spent = f"${record.spent_usd:.2f}"
             match outcome.status:
                 case "finished":
                     self._say(f"{run} finished. Spent {spent} in all.")
                 case "stopped":
-                    self._say(f"{run} {outcome.detail or f'stopped at {outcome.stage}'}. Spent {spent} in all.")
+                    record.note = blocked_note(self.gateway_for(run).comments(), outcome.stage) if outcome.stage and not outcome.detail else ""
+                    hint = "Fix it, then send `resume`." if record.note else ""
+                    self._say("\n\n".join(filter(None, [f"{run} {outcome.detail or f'stopped at {outcome.stage}'}. Spent {spent} in all.", record.note, hint])))
                 case "capped":
                     self._say(f"{run} was not started: {outcome.detail}.")
                 case _:
@@ -158,8 +162,12 @@ class Concierge:
         waiting = self._waiting()
         if len(waiting) == 1:
             return next(iter(waiting.values()))
-        self._say(f"Several runs are waiting: {', '.join(waiting)}. Reply to the message you mean." if waiting else "Nothing is waiting for a decision, so nothing was posted.")
+        self._say(f"Several runs are waiting: {', '.join(waiting)}. Reply to the message you mean." if waiting else self._nothing_waiting())
         return None
+
+    def _nothing_waiting(self) -> str:
+        stops = [f"{name} is stopped.\n{record.note}" for name, record in self.state.runs.items() if record.status == "stopped" and record.note]
+        return "\n\n".join(["Nothing is waiting for a decision, so nothing was posted.", *stops])
 
     def _text(self, event: Event, spoken: bool = False) -> None:
         text = event.text.strip()
@@ -172,6 +180,8 @@ class Concierge:
             return self._say("Type `undo` to undo; I do not delete a comment from a transcript.") if spoken else self._undo()
         if word == "stop" or word.startswith("stop "):
             return self._stop(text[4:].strip().rstrip(".!? "))
+        if word == "resume" or word.startswith("resume "):
+            return self._resume(text[6:].strip().rstrip(".!? "))
         if event.message_id is None and not any(m.kind == "feedback" for m in self.state.messages.values()) and self._start_intended(text):
             return
         if (message := self._target(event)) is None:
@@ -263,6 +273,9 @@ class Concierge:
         action = action_from(message.action or {})
         if action.kind == "stop":
             return self._say("Stopping; the pipeline posts its cost comment first." if self.supervisor.stop(RunId.parse(message.run)) else "That run is not running.")
+        if action.kind == "resume":
+            refusal = self.supervisor.resume(RunId.parse(message.run))
+            return self._say(f"Not resumed: {refusal}." if refusal else f"Resumed {message.run}.")
         self._post(message, action, message.words)
 
     def _post(self, message: Message, action: Action, words: str) -> None:
@@ -299,6 +312,16 @@ class Concierge:
             return self._say(f"Say {' or '.join(f'`stop {run}`' for run in active)}." if active else "Nothing is running.")
         message_id = self._send(f"{runs[0]}: stop this run? It is interrupted, posts its cost comment and exits.", CONFIRM_CHOICES)
         self.state.messages[message_id] = Message(str(runs[0]), NO_STAGE, "confirm", asdict(Action("stop")))
+
+    def _resume(self, name: str) -> None:
+        stopped = [run for run, record in self.state.runs.items() if record.status in RESUMABLE_BY_HAND and (not name or run == name)]
+        if len(stopped) != 1:
+            options = [run for run, record in self.state.runs.items() if record.status in RESUMABLE_BY_HAND]
+            return self._say(f"Say {' or '.join(f'`resume {run}`' for run in options)}." if options else "No run is stopped.")
+        cap = self.supervisor.config.daily_cap_usd
+        text = f"{stopped[0]}: resume this run? It reruns the stage it stopped at.\n\n${self.supervisor.remaining_today():.2f} left of today's ${cap:.2f} cap"
+        message_id = self._send(text, CONFIRM_CHOICES)
+        self.state.messages[message_id] = Message(stopped[0], NO_STAGE, "confirm", asdict(Action("resume")))
 
     def _undo(self) -> None:
         if not self.state.posted:
