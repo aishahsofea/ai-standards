@@ -983,6 +983,16 @@ def test_events_follow_the_run(tmp_path):
     assert all(len(detail) <= 120 for *_, detail in events)
 
 
+def test_each_fix_round_is_an_event(tmp_path):
+    events = []
+    h = Harness(tmp_path, emit=lambda *event: events.append(event))
+    h.review_reply = "Status: fail\n- Critical: SQL injection"
+    assert h.pipeline().run() == "review"
+    assert [event for event in events if event[0] == "review-failed"] == [
+        ("review-failed", "review", "fix round 1 of 2"), ("review-failed", "review", "fix round 2 of 2")
+    ]
+
+
 def test_a_resumed_run_does_not_repeat_events_for_finished_stages(tmp_path):
     h = Harness(tmp_path)
     h.pipeline().run()
