@@ -40,6 +40,8 @@ pipeline run "Add a dark mode toggle" --dry-run
 | `--worktree` | Work in a separate git worktree. See [Worktree](#worktree). |
 | `--step` | Ask `y/N` after every stage, not only at the gates and after `plan`. |
 | `--headless` | Never read the terminal; ask on the issue instead. See [Headless](#headless). Not with `--step`. |
+| `--json` | Print a last line of JSON for programs: `{"status": "finished\|stopped\|waiting", "stage": ..., "request": ..., "spent_usd": ...}`. Also on `revise`. |
+| `--events PATH` | Append one JSON line per progress event to `PATH`: `{"event", "stage", "detail", "timestamp"}`. Events are `stage-started`, `stage-finished`, `plan-posted`, `ci-green` and `blocked` (the run stopped at `stage` and is not waiting for a reply). Without the flag nothing is written. Also on `revise`. |
 
 The run asks `y/N` three times: at the two gates and after `plan`. At the gates it shows what you must review. After `plan` it shows `## Prerequisites` (what only you can supply, such as a captured fixture or a login), the phase titles, `## Assumptions` and `## Out of scope`, so you can supply them or decline before any code is written. Each prompt, and a run that stops, rings the terminal bell and on macOS shows a notification.
 
@@ -74,6 +76,8 @@ With `--headless` the run never reads the terminal, so it can run with no one wa
 | 0 | Finished, or stopped for a reason other than a missing reply (a blocked stage, `/reject`, `--stop-after`). |
 | 1 | Error. |
 | 3 | Waiting for your reply. The last line names the request. |
+
+A run holds a lock on `.agent/runs/<slug>/` while it works, so a second process on the same slug exits with an error instead of racing the first.
 
 ## Worktree
 

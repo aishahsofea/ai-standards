@@ -166,6 +166,7 @@ class Pipeline:
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
     ci_timeout_s: float = CI_TIMEOUT_S
+    emit: Callable[[str, str, str], None] = lambda event, stage, detail: None
 
     def run(self) -> str | None:
         """Runs stages in order; returns the stage it stopped at, or None when finished."""
@@ -247,6 +248,7 @@ class Pipeline:
     def _execute(self, stage: Stage, note: str = "") -> Outcome:
         if not note and self.forge.has_artifact(stage.output):
             return "skipped"
+        self.emit("stage-started", stage.name, "")
         prompt = self.build_prompt(stage, note)
         result = self._verified(stage, prompt, self._with_status(stage, prompt, self._run(stage, prompt)))
         report = self._blocked_report(stage, result.text)
@@ -266,6 +268,9 @@ class Pipeline:
             self.forge.open_issue(issue_title(result.text), result.text)
         else:
             self.forge.post_artifact(stage.output, result.text)
+        self.emit("stage-finished", stage.name, "")
+        if stage.name == PLAN.name:
+            self.emit("plan-posted", stage.name, "")
         return "done"
 
     def revise(self, feedback: str) -> str | None:
@@ -329,6 +334,7 @@ class Pipeline:
             failing = [check for check in failing if check.name not in on_base]
             if not failing:
                 self.show(ci_summary(checks, on_base))
+                self.emit("ci-green", "ci", f"{len(checks)} checks")
                 return None
             names = ", ".join(check.name for check in failing)
             if attempt == MAX_CI_ROUNDS:

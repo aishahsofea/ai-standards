@@ -1,6 +1,9 @@
+import fcntl
 import re
 import shutil
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 REQUEST_KEY = r"baseline|gate-a|plan|gate-b|allow"
@@ -23,12 +26,33 @@ def check_artifact(name: str) -> None:
         raise ValueError(f"unknown artifact: {name}")
 
 
+class RunLocked(Exception):
+    pass
+
+
+def run_path(repo: Path, slug: str) -> Path:
+    return repo / ".agent" / "runs" / slug
+
+
+@contextmanager
+def run_lock(repo: Path, slug: str) -> Iterator[None]:
+    """Holds an exclusive lock on the run until the block ends or the process dies."""
+    directory = run_path(repo, slug)
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / "lock").open("w") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RunLocked(f"run '{slug}' is already running") from None
+        yield
+
+
 class RunDir:
     def __init__(self, repo: Path, slug: str, work: Path | None = None) -> None:
         """Run state lives under `repo`; `work` is where the code is changed, when that is a separate worktree."""
         self.repo = work or repo
         self.slug = slug
-        self.path = repo / ".agent" / "runs" / slug
+        self.path = run_path(repo, slug)
         self.path.mkdir(parents=True, exist_ok=True)
         self._staging: Path | None = None
 

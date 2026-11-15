@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from pipeline import cli
@@ -5,6 +7,7 @@ from pipeline.agent import AgentError, FakeAgent
 from pipeline.cost import BudgetExceeded
 from pipeline.cli import main
 from pipeline.forge import FakeForge, Issue, RunState
+from pipeline.run_dir import run_lock
 
 
 def test_dry_run_finishes_end_to_end(capsys):
@@ -247,3 +250,101 @@ def test_headless_revise_waits_at_gate_b(tmp_path, monkeypatch, fake_github, cap
     assert main(["run", "--resume", "add-dark-mode", "--repo", str(tmp_path), "--headless"]) == 3
     assert main(["revise", "add-dark-mode", "Use a modal", "--repo", str(tmp_path), "--headless"]) == 3
     assert "revision-1" in fake_github.artifacts and "request-gate-b" in capsys.readouterr().out
+
+
+def last_json(capsys):
+    return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+def test_json_reports_what_the_issue_has_cost(tmp_path, monkeypatch, fake_github, capsys):
+    use_agent(monkeypatch, FakeAgent(cli.dry_run_text, cost_usd=0.5))
+    run_in(tmp_path, "--json", "--stop-after", "analyze")
+    assert last_json(capsys)["spent_usd"] == 1.0
+    main(["run", "--resume", "add-dark-mode", "--repo", str(tmp_path), "--stop-after", "decide", "--json"])
+    assert last_json(capsys)["spent_usd"] == 1.5
+
+
+def test_json_reports_a_wait_with_its_stage_and_request(capsys):
+    assert main(["run", "Add dark mode", "--dry-run", "--headless", "--json"]) == 3
+    assert last_json(capsys) == {"status": "waiting", "stage": "plan", "request": "plan", "spent_usd": 0.0}
+
+
+def test_json_reports_a_finished_run(capsys):
+    assert main(["run", "Add dark mode", "--dry-run", "--json"]) == 0
+    assert last_json(capsys) == {"status": "finished", "stage": None, "request": None, "spent_usd": 0.0}
+
+
+def test_json_reports_a_stop(capsys):
+    assert main(["run", "Add dark mode", "--dry-run", "--stop-after", "plan", "--json"]) == 0
+    assert last_json(capsys) == {"status": "stopped", "stage": "plan", "request": None, "spent_usd": 0.0}
+
+
+def test_json_reports_a_blocked_stage_as_stopped(tmp_path, monkeypatch, fake_github, capsys):
+    use_agent(monkeypatch, FakeAgent(lambda prompt: "Status: blocked - nope"))
+    assert run_in(tmp_path, "--headless", "--json") == 0
+    assert last_json(capsys) == {"status": "stopped", "stage": "issue", "request": None, "spent_usd": 0.0}
+
+
+def test_json_is_the_last_line_of_a_revise(tmp_path, monkeypatch, fake_github, capsys):
+    use_agent(monkeypatch, FakeAgent(lambda prompt: "Status: done\nrevised" if "/revise/SKILL.md" in prompt else cli.dry_run_text(prompt)))
+    run_in(tmp_path, "--headless")
+    fake_github.reply("/approve")
+    main(["run", "--resume", "add-dark-mode", "--repo", str(tmp_path), "--headless"])
+    capsys.readouterr()
+    assert main(["revise", "add-dark-mode", "Use a modal", "--repo", str(tmp_path), "--headless", "--json"]) == 3
+    assert last_json(capsys) == {"status": "waiting", "stage": "docs", "request": "gate-b", "spent_usd": 0.0}
+
+
+def test_no_json_line_without_the_flag(capsys):
+    main(["run", "Add dark mode", "--dry-run"])
+    assert not capsys.readouterr().out.strip().endswith("}")
+
+
+def test_a_second_process_on_the_same_run_is_refused(tmp_path, monkeypatch, fake_github, capsys):
+    use_agent(monkeypatch, FakeAgent(cli.dry_run_text))
+    with run_lock(tmp_path, "add-dark-mode"):
+        assert run_in(tmp_path) == 1
+    assert "already running" in capsys.readouterr().err
+    assert run_in(tmp_path) == 0
+
+
+def test_the_lock_is_per_run(tmp_path):
+    with run_lock(tmp_path, "one"), run_lock(tmp_path, "two"):
+        pass
+
+
+def read_events(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def test_events_flag_appends_one_json_object_per_line(tmp_path, capsys):
+    events = tmp_path / "run.events.jsonl"
+    events.write_text('{"event": "earlier"}\n')
+    assert main(["run", "Add dark mode", "--dry-run", "--events", str(events)]) == 0
+    lines = read_events(events)
+    assert lines[0] == {"event": "earlier"}
+    assert {"stage-started", "stage-finished", "plan-posted", "ci-green"} <= {line["event"] for line in lines}
+    assert all(set(line) == {"event", "stage", "detail", "timestamp"} for line in lines[1:])
+
+
+def test_without_the_events_flag_nothing_is_written(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert main(["run", "Add dark mode", "--dry-run"]) == 0
+    assert not list(tmp_path.rglob("*.jsonl"))
+
+
+def test_a_blocked_stage_is_an_event(tmp_path, monkeypatch, fake_github):
+    use_agent(monkeypatch, FakeAgent(lambda prompt: "Status: blocked - nope", cost_usd=0.5))
+    events = tmp_path / "events.jsonl"
+    assert run_in(tmp_path, "--events", str(events)) == 0
+    assert [(line["event"], line["stage"]) for line in read_events(events)][-1] == ("blocked", "issue")
+
+
+def test_waiting_and_a_deliberate_stop_are_not_blocked(tmp_path):
+    events = tmp_path / "events.jsonl"
+    assert main(["run", "Add dark mode", "--dry-run", "--stop-after", "plan", "--events", str(events)]) == 0
+    assert "blocked" not in {line["event"] for line in read_events(events)}
+
+
+def test_revise_accepts_events(tmp_path):
+    assert main(["revise", "x", "fb", "--repo", str(tmp_path), "--events", str(tmp_path / "e.jsonl")]) == 1
