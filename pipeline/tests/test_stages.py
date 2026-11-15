@@ -969,3 +969,24 @@ def test_revise_waits_for_ci_before_asking_gate_b_again(tmp_path):
     assert h.pipeline().revise("Use a modal") is None
     assert len(skill_calls(h, "ci-fix")) == 1
     assert h.forge.calls[-1][0] == "finish"
+
+
+def test_events_follow_the_run(tmp_path):
+    events = []
+    h = Harness(tmp_path, emit=lambda *event: events.append(event))
+    h.forge.ci_results = [[Check("build", "pass")]]
+    assert h.pipeline().run() is None
+    names = [event[:2] for event in events]
+    assert names[:4] == [("stage-started", "issue"), ("stage-finished", "issue"), ("stage-started", "analyze"), ("stage-finished", "analyze")]
+    assert names.count(("plan-posted", "plan")) == 1 and names.index(("stage-finished", "plan")) < names.index(("plan-posted", "plan"))
+    assert names[-1] == ("ci-green", "ci")
+    assert all(len(detail) <= 120 for *_, detail in events)
+
+
+def test_a_resumed_run_does_not_repeat_events_for_finished_stages(tmp_path):
+    h = Harness(tmp_path)
+    h.pipeline().run()
+    events = []
+    h.options["emit"] = lambda *event: events.append(event)
+    h.pipeline().run()
+    assert [event[:2] for event in events] == [("ci-green", "ci")]

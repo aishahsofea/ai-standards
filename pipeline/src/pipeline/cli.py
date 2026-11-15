@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 
 from pipeline.agent import AgentError, Denial, FakeAgent
@@ -17,7 +18,7 @@ from pipeline.gates import GateError, confirm, plan_commands
 from pipeline.node_bin import NodeNotFound, env_with_node, resolve_node_bin
 from pipeline.owner import HeadlessOwner, Owner, TerminalOwner
 from pipeline.permissions import allowed_tools, ask_approvals, command_rules, repo_checks
-from pipeline.run_dir import RunDir, slugify
+from pipeline.run_dir import RunDir, RunLocked, run_lock, slugify
 from pipeline.stages import CI_TIMEOUT_S, PLAN, Pipeline, Stage
 from pipeline.stats import render_stats, run_stats
 from pipeline.worktree import create_worktree
@@ -26,6 +27,9 @@ SKILLS_DIR = Path(__file__).resolve().parents[3] / "skills"
 AGENT_TIMEOUT_S = 1800
 EVIDENCE_ENV = "PIPELINE_EVIDENCE_DIR"
 HEADLESS_HELP = "never read the terminal: ask on the issue and exit 3 while waiting for a reply"
+JSON_HELP = "print a final line of JSON: status (finished, stopped or waiting), stage, request and spent_usd"
+EVENTS_HELP = "append one JSON line per progress event (stage-started, stage-finished, plan-posted, ci-green, blocked) to this file"
+EVENT_DETAIL_CHARS = 120
 WAITING_EXIT = 3
 
 
@@ -66,15 +70,33 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--worktree", action="store_true", help="work in a separate git worktree and leave this checkout alone")
     run.add_argument("--step", action="store_true", help="ask y/N after every stage, not only at the gates and the plan")
     run.add_argument("--headless", action="store_true", help=HEADLESS_HELP)
+    run.add_argument("--json", action="store_true", help=JSON_HELP)
+    run.add_argument("--events", type=Path, metavar="PATH", help=EVENTS_HELP)
     revise = commands.add_parser("revise", help="apply your feedback to a finished run's branch")
     revise.add_argument("slug", help="the run to revise")
     revise.add_argument("feedback", help="what should change")
     revise.add_argument("--repo", type=Path, default=Path.cwd(), help="target repo (default: current directory)")
     revise.add_argument("--headless", action="store_true", help=HEADLESS_HELP)
+    revise.add_argument("--json", action="store_true", help=JSON_HELP)
+    revise.add_argument("--events", type=Path, metavar="PATH", help=EVENTS_HELP)
     revise.set_defaults(dry_run=False)
     stats = commands.add_parser("stats", help="show where past runs in a repo stopped and what they cost")
     stats.add_argument("--repo", type=Path, default=Path.cwd(), help="target repo (default: current directory)")
     return parser
+
+
+def event_writer(path: Path | None) -> Callable[[str, str, str], None]:
+    def emit(event: str, stage: str, detail: str) -> None:
+        if path is None:
+            return
+        line = {"event": event, "stage": stage, "detail": detail[:EVENT_DETAIL_CHARS], "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        try:
+            with path.open("a") as events:
+                events.write(json.dumps(line) + "\n")
+        except OSError:
+            pass  # progress is informational; a bad path must not stop a paid run
+
+    return emit
 
 
 def post_cost(forge: Forge, ledger: CostLedger) -> None:
@@ -137,53 +159,63 @@ def open_run(args: argparse.Namespace, repo: Path, slug: str, state: RunState) -
         stop_after=getattr(args, "stop_after", None), pause_each=getattr(args, "step", False),
         checks=(lambda: run_checks(commands, work, env_with_node(node_bin))) if commands else None,
         ci_timeout_s=float(os.environ.get("CI_TIMEOUT_S", CI_TIMEOUT_S)),
+        emit=event_writer(args.events),
     )
     return pipeline, run_dir, forge, ledger
 
 
-def finish_run(pipeline: Pipeline, pipeline_run: Callable[[], str | None], run_dir: RunDir, forge: Forge, ledger: CostLedger, slug: str) -> int:
+def finish_run(
+    pipeline: Pipeline, pipeline_run: Callable[[], str | None], run_dir: RunDir, forge: Forge, ledger: CostLedger, slug: str, as_json: bool = False
+) -> int:
     try:
         stopped = pipeline_run()
     finally:
         post_cost(forge, ledger)
         run_dir.close()
     spent = f"spent ${ledger.total():.2f}"
+    waiting = pipeline.owner.waiting
     if stopped is None:
         print(f"Finished; {spent}")
-    elif waiting := pipeline.owner.waiting:
+    elif waiting:
         print(
             f"Waiting on the owner at '{stopped}'; {spent}. Reply to the '{request_name(waiting)}' comment on the issue, "
             f"then run: pipeline run --resume {slug} --headless"
         )
-        return WAITING_EXIT
     else:
         print(f"Stopped at '{stopped}'; {spent}. Resume with: pipeline run --resume {slug}")
+        if stopped != pipeline.stop_after:
+            pipeline.emit("blocked", stopped, f"stopped at {stopped}")
         pipeline.owner.notify(f"{slug} stopped at {stopped}")
-    return 0
+    if as_json:
+        status = "finished" if stopped is None else "waiting" if waiting else "stopped"
+        print(json.dumps({"status": status, "stage": stopped, "request": waiting if stopped else None, "spent_usd": round(ledger.total(), 4)}))
+    return WAITING_EXIT if stopped and waiting else 0
 
 
 def run_pipeline(args: argparse.Namespace) -> int:
     repo = Path(tempfile.mkdtemp(prefix="pipeline-dry-run-")) if args.dry_run else args.repo.resolve()
     issue = fetch_issue(repo, args.issue) if args.issue else None
     slug = args.resume or (slugify(f"{issue.number} {issue.title}") if issue else slugify(args.idea))
-    state_path = RunDir(repo, slug).state_path
-    if args.resume and not state_path.exists():
-        raise ForgeError(f"no run '{slug}' in {repo}")
-    if args.resume or (issue and state_path.exists()):
-        state = RunState.load(state_path)
-    else:
-        state = RunState(issue.title, issue.url) if issue else RunState(args.idea)
-    pipeline, run_dir, forge, ledger = open_run(args, repo, slug, state)
-    return finish_run(pipeline, pipeline.run, run_dir, forge, ledger, slug)
+    with run_lock(repo, slug):
+        state_path = RunDir(repo, slug).state_path
+        if args.resume and not state_path.exists():
+            raise ForgeError(f"no run '{slug}' in {repo}")
+        if args.resume or (issue and state_path.exists()):
+            state = RunState.load(state_path)
+        else:
+            state = RunState(issue.title, issue.url) if issue else RunState(args.idea)
+        pipeline, run_dir, forge, ledger = open_run(args, repo, slug, state)
+        return finish_run(pipeline, pipeline.run, run_dir, forge, ledger, slug, args.json)
 
 
 def revise_pipeline(args: argparse.Namespace) -> int:
     repo = args.repo.resolve()
-    state_path = RunDir(repo, args.slug).state_path
-    if not state_path.exists():
-        raise ForgeError(f"no run '{args.slug}' in {repo}")
-    pipeline, run_dir, forge, ledger = open_run(args, repo, args.slug, RunState.load(state_path))
-    return finish_run(pipeline, lambda: pipeline.revise(args.feedback), run_dir, forge, ledger, args.slug)
+    with run_lock(repo, args.slug):
+        state_path = RunDir(repo, args.slug).state_path
+        if not state_path.exists():
+            raise ForgeError(f"no run '{args.slug}' in {repo}")
+        pipeline, run_dir, forge, ledger = open_run(args, repo, args.slug, RunState.load(state_path))
+        return finish_run(pipeline, lambda: pipeline.revise(args.feedback), run_dir, forge, ledger, args.slug, args.json)
 
 
 def run_eval(args: argparse.Namespace) -> int:
@@ -224,6 +256,6 @@ def main(argv: list[str] | None = None) -> int:
             print(render_stats([run_stats(issue) for issue in pipeline_issues(args.repo.resolve())]))
             return 0
         return run_pipeline(args) if args.command == "run" else revise_pipeline(args)
-    except (AgentError, BudgetExceeded, ForgeError, GateError, NodeNotFound) as error:
+    except (AgentError, BudgetExceeded, ForgeError, GateError, NodeNotFound, RunLocked) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
