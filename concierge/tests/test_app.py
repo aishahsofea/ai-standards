@@ -572,9 +572,14 @@ def emit(w, run, *lines):
 
 def test_notable_events_are_short_silent_messages_without_buttons(w):
     assert w.supervisor.resume(RUN) is None
-    emit(w, RUN, event_line("stage-started", "analyze"), event_line("plan-posted", "plan"), event_line("ci-green", "ci", "3 checks"), event_line("blocked", "ci"))
-    assert [text for _, text, _ in w.chat.sent] == ["shop/dark-mode: plan posted", "shop/dark-mode: CI green", "shop/dark-mode: blocked: ci"]
-    assert all(not choices for *_, choices in w.chat.sent) and w.chat.silent == {"1", "2", "3"}
+    emit(
+        w, RUN, event_line("stage-started", "analyze"), event_line("plan-posted", "plan"), event_line("review-failed", "review", "fix round 1 of 2"),
+        event_line("ci-green", "ci", "3 checks"), event_line("blocked", "ci"),
+    )
+    assert [text for _, text, _ in w.chat.sent] == [
+        "shop/dark-mode: plan posted", "shop/dark-mode: review failed, starting fix round 1 of 2", "shop/dark-mode: CI green", "shop/dark-mode: blocked: ci"
+    ]
+    assert all(not choices for *_, choices in w.chat.sent) and w.chat.silent == {"1", "2", "3", "4"}
     assert w.state.messages == {}
 
 

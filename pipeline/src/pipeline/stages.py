@@ -312,6 +312,7 @@ class Pipeline:
         """Runs fix, test and review after a failed review, up to MAX_FIX_ROUNDS times; returns the stage it stopped at, or None once the review passes."""
         review = replace(review, inputs=(*review.inputs, "review.blocked", FIX.output))
         for number in range(1, MAX_FIX_ROUNDS + 1):
+            self.emit("review-failed", review.name, f"fix round {number} of {MAX_FIX_ROUNDS}")
             self.show(f"review failed; running fix round {number} of {MAX_FIX_ROUNDS}")
             for stage in (FIX, test):
                 note = FIX_NOTE.format(round=number, rounds=MAX_FIX_ROUNDS) if stage is FIX else RECHECK_NOTE

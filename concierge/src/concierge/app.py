@@ -28,7 +28,7 @@ NO_STAGE = Bound("", 0, "")
 START_RUN = ""
 BUTTON_ONLY = {"confirm", "pick-repo"}
 RESUMABLE_BY_HAND = {"stopped", "error", "capped"}
-PROGRESS_TEXT = {"plan-posted": "plan posted", "ci-green": "CI green", "blocked": "blocked: {stage}"}
+PROGRESS_TEXT = {"plan-posted": "plan posted", "review-failed": "review failed, starting {detail}", "ci-green": "CI green", "blocked": "blocked: {stage}"}
 
 
 def needs_confirm(key: str, action: Action, from_button: bool) -> bool:
@@ -96,7 +96,7 @@ class Concierge:
         for outcome in updates:
             if isinstance(outcome, Progress):
                 if text := PROGRESS_TEXT.get(outcome.event):
-                    self.chat.send(f"{outcome.run}: {text.format(stage=outcome.stage)}", silent=True)
+                    self.chat.send(f"{outcome.run}: {text.format(stage=outcome.stage, detail=outcome.detail)}", silent=True)
                 continue
             run = outcome.run
             if outcome.status == "waiting":
